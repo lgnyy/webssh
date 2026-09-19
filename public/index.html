@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebSSH - 浏览器 SSH 终端 (可配置服务器列表)</title>
+<link rel="stylesheet" href="css/xterm.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #1e1e2e; color: #cdd6f4; display: flex; flex-direction: column;
+  }
+
+  /* ===== 登录栏 ===== */
+  #loginbar {
+    flex: 0 0 auto; background: #181825; border-bottom: 1px solid #313244;
+    padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end;
+  }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field label { font-size: 11px; color: #89b4fa; }
+  .field input[type=text], .field input[type=password], .field input[type=file], .field select {
+    background: #11111b; border: 1px solid #45475a; border-radius: 4px; color: #cdd6f4;
+    padding: 6px 8px; font-size: 13px; outline: none; height: 32px;
+  }
+  .field input:focus, .field select:focus { border-color: #89b4fa; }
+  .field input[type=file] { width: 210px; font-size: 11px; padding: 4px; }
+  #f-wsurl input { width: 240px; }
+  #f-user input { width: 120px; }
+  #f-svraddr select { width: 220px; }
+
+  /* 服务器地址行 - 下拉 + 配置按钮 */
+  #svraddr-row { display: flex; gap: 4px; align-items: center; }
+  #svraddr-row select { flex: 1; }
+  #btn-config {
+    background: #45475a; border: 1px solid #585b70; color: #cdd6f4; border-radius: 4px;
+    height: 32px; padding: 0 10px; font-size: 13px; cursor: pointer; white-space: nowrap;
+  }
+  #btn-config:hover { background: #585b70; border-color: #89b4fa; }
+
+  /* 认证方式切换 */
+  #auth-tabs { display: flex; gap: 0; }
+  #auth-tabs button {
+    background: #11111b; border: 1px solid #45475a; color: #a6adc8; padding: 6px 14px;
+    font-size: 12px; cursor: pointer; height: 32px;
+  }
+  #auth-tabs button:first-child { border-radius: 4px 0 0 4px; }
+  #auth-tabs button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+  #auth-tabs button.active { background: #89b4fa; color: #11111b; border-color: #89b4fa; font-weight: 600; }
+
+  #btn-connect {
+    background: #a6e3a1; color: #11111b; border: none; border-radius: 4px; padding: 7px 22px;
+    font-size: 13px; font-weight: 600; cursor: pointer; height: 32px;
+  }
+  #btn-connect:hover { background: #94d890; }
+  #btn-connect:disabled { background: #45475a; color: #7f849c; cursor: not-allowed; }
+  #btn-connect.disconnect { background: #f38ba8; }
+  #btn-connect.disconnect:hover { background: #eb6f92; }
+
+  #btn-sftp {
+    background: #313244; border: 1px solid #585b70; color: #cdd6f4; border-radius: 4px;
+    padding: 0 14px; font-size: 13px; cursor: pointer; height: 32px; font-weight: 600;
+  }
+  #btn-sftp:hover { background: #45475a; border-color: #89b4fa; }
+  #btn-sftp.active { background: #89b4fa; color: #11111b; border-color: #89b4fa; }
+
+  #status { font-size: 12px; color: #a6adc8; padding-bottom: 8px; }
+  #status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #6c7086; margin-right: 5px; }
+  #status.connected .dot { background: #a6e3a1; }
+  #status.connecting .dot { background: #f9e2af; }
+  #status.error .dot { background: #f38ba8; }
+
+  /* ===== 配置弹窗 ===== */
+  #config-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.55); z-index: 1000; align-items: center; justify-content: center;
+  }
+  #config-overlay.show { display: flex; }
+  #config-panel {
+    background: #1e1e2e; border: 1px solid #45475a; border-radius: 10px;
+    width: 640px; max-width: 94vw; max-height: 86vh; display: flex; flex-direction: column;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  }
+  #config-header {
+    padding: 14px 20px; border-bottom: 1px solid #313244; display: flex;
+    align-items: center; justify-content: space-between;
+  }
+  #config-header h2 { font-size: 16px; color: #89b4fa; font-weight: 600; }
+  #config-close {
+    background: none; border: none; color: #a6adc8; font-size: 22px; cursor: pointer;
+    line-height: 1; padding: 0 4px;
+  }
+  #config-close:hover { color: #f38ba8; }
+
+  #config-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+  #config-body .hint { font-size: 12px; color: #7f849c; margin-bottom: 12px; line-height: 1.7; }
+
+  /* 服务器条目列表 */
+  #srv-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  .srv-item {
+    display: flex; gap: 8px; align-items: center; background: #181825;
+    border: 1px solid #313244; border-radius: 6px; padding: 8px 10px;
+  }
+  .srv-item input {
+    background: #11111b; border: 1px solid #45475a; border-radius: 4px; color: #cdd6f4;
+    padding: 6px 8px; font-size: 13px; outline: none; height: 32px;
+  }
+  .srv-item input:focus { border-color: #89b4fa; }
+  .srv-item .srv-name { width: 140px; flex: 0 0 140px; }
+  .srv-item .srv-addr { flex: 1; min-width: 120px; }
+  .srv-item .srv-user { width: 110px; flex: 0 0 110px; }
+  .srv-item .srv-del {
+    background: #432d3b; border: 1px solid #f38ba8; color: #f38ba8; border-radius: 4px;
+    height: 32px; width: 36px; font-size: 16px; cursor: pointer; flex: 0 0 36px;
+  }
+  .srv-item .srv-del:hover { background: #f38ba8; color: #11111b; }
+  .srv-item .srv-label { font-size: 10px; color: #6c7086; text-align: center; }
+
+  #btn-add-srv {
+    background: #313244; border: 1px dashed #585b70; color: #a6adc8; border-radius: 6px;
+    padding: 9px; font-size: 13px; cursor: pointer; width: 100%; margin-bottom: 16px;
+  }
+  #btn-add-srv:hover { background: #45475a; color: #cdd6f4; border-color: #89b4fa; }
+
+  #config-footer {
+    padding: 14px 20px; border-top: 1px solid #313244; display: flex;
+    gap: 10px; justify-content: flex-end;
+  }
+  #config-footer button {
+    border: none; border-radius: 4px; padding: 8px 22px; font-size: 13px;
+    font-weight: 600; cursor: pointer;
+  }
+  #btn-save-config { background: #a6e3a1; color: #11111b; }
+  #btn-save-config:hover { background: #94d890; }
+  #btn-cancel-config { background: #45475a; color: #cdd6f4; }
+  #btn-cancel-config:hover { background: #585b70; }
+
+  /* ===== 主机密钥确认条 ===== */
+  #hostkey-bar {
+    flex: 0 0 auto; display: none; background: #432d3b; border-bottom: 1px solid #f38ba8;
+    padding: 8px 14px; font-size: 12px; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  #hostkey-bar .hk-text { line-height: 1.7; }
+  #hostkey-bar .hk-fp { font-family: Consolas, monospace; color: #f9e2af; word-break: break-all; }
+  #hostkey-bar button {
+    border: none; border-radius: 4px; padding: 6px 16px; font-size: 12px; cursor: pointer; font-weight: 600;
+  }
+  #btn-hk-trust { background: #a6e3a1; color: #11111b; }
+  #btn-hk-reject { background: #f38ba8; color: #11111b; }
+  #hk-save { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+  /* ===== 终端 ===== */
+  #main-area { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
+  #sftp-panel {
+    display: none; flex: 0 0 25%; min-width: 240px; max-width: 80%;
+    background: #11111b; border-right: 1px solid #313244;
+  }
+  #sftp-panel iframe { width: 100%; height: 100%; border: none; }
+  #sftp-splitter {
+    display: none; flex: 0 0 5px; background: #313244; cursor: col-resize;
+    user-select: none; -webkit-user-select: none;
+  }
+  #sftp-splitter:hover, #sftp-splitter.dragging { background: #89b4fa; }
+  #terminal-wrap { flex: 1 1 auto; min-height: 0; padding: 4px; background: #11111b; overflow: hidden; position: relative; }
+  #terminal { width: 100%; height: 100%; }
+  #tip {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #585b70; font-size: 14px; pointer-events: none; text-align: center; line-height: 2;
+  }
+</style>
+</head>
+<body>
+
+<div id="loginbar">
+  <div class="field" id="f-wsurl">
+    <label>WebSocket 地址</label>
+    <input type="text" id="wsurl" value="ws://127.0.0.1/websocket" spellcheck="false" autocomplete="off">
+  </div>
+  <div class="field" id="f-svraddr">
+    <label>服务器（从列表选择）</label>
+    <div id="svraddr-row">
+      <select id="svraddr">
+        <option value="">-- 请先在配置中管理服务器 --</option>
+      </select>
+      <button id="btn-config" type="button" title="管理服务器列表">⚙ 配置</button>
+    </div>
+  </div>
+
+  <div class="field" id="f-user">
+    <label>用户名</label>
+    <input type="text" id="username" spellcheck="false" autocomplete="off" placeholder="root">
+  </div>
+
+  <div class="field">
+    <label>认证方式</label>
+    <div id="auth-tabs">
+      <button id="tab-password" type="button">密码</button>
+      <button id="tab-key" class="active" type="button">私钥</button>
+    </div>
+  </div>
+
+  <div class="field" id="f-password" style="display:none">
+    <label>密码</label>
+    <input type="password" id="password" autocomplete="current-password" placeholder="使用密码管理器自动填充">
+  </div>
+
+  <div class="field" id="f-keyfile">
+    <label>私钥文件 (OpenSSH / PEM)</label>
+    <input type="file" id="keyfile">
+  </div>
+  <div class="field" id="f-keypass">
+    <label>私钥口令 (可空)</label>
+    <input type="password" id="keypassphrase" autocomplete="off">
+  </div>
+
+  <button id="btn-connect" type="button">连 接</button>
+  <button id="btn-sftp" type="button" title="切换 SFTP 文件管理器">SFTP</button>
+  <div id="status"><span class="dot"></span><span id="status-text">未连接</span></div>
+</div>
+
+<!-- ============ 配置弹窗 ============ -->
+<div id="config-overlay">
+  <div id="config-panel">
+    <div id="config-header">
+      <h2>⚙ 服务器配置管理</h2>
+      <button id="config-close" type="button">&times;</button>
+    </div>
+    <div id="config-body">
+      <div class="hint">
+        在此添加/编辑服务器。每行需要填写：<b>名称</b>（下拉列表中显示）、<b>地址</b>（host:port 或 host）、<b>用户名</b>（可选，选中该服务器时自动填充）。<br>
+        配置将自动保存在浏览器本地（localStorage），下次打开页面时依然存在。
+      </div>
+      <div id="srv-list"></div>
+      <button id="btn-add-srv" type="button">＋ 添加服务器</button>
+    </div>
+    <div id="config-footer">
+      <button id="btn-cancel-config" type="button">取消</button>
+      <button id="btn-save-config" type="button">保存配置</button>
+    </div>
+  </div>
+</div>
+
+<div id="hostkey-bar">
+  <div class="hk-text">
+    <div id="hk-title">首次连接，请核对服务器主机密钥指纹：</div>
+    <div>算法：<b id="hk-type"></b></div>
+    <div class="hk-fp" id="hk-fp"></div>
+  </div>
+  <label id="hk-save"><input type="checkbox" id="hk-remember" checked> 信任并保存到本机</label>
+  <button id="btn-hk-trust" type="button">信任并连接</button>
+  <button id="btn-hk-reject" type="button">拒绝</button>
+</div>
+
+<div id="main-area">
+  <div id="sftp-panel">
+    <iframe id="sftp-frame"></iframe>
+  </div>
+  <div id="sftp-splitter"></div>
+  <div id="terminal-wrap">
+    <div id="terminal"></div>
+    <div id="tip">
+      SSH 会话将在这里显示<br>
+    </div>
+  </div>
+</div>
+
+<script src="lib/xterm.min.js"></script>
+<script src="lib/xterm-addon-fit.min.js"></script>
+<script src="lib/ssh/ssh-util.js"></script>
+<script src="lib/ssh/ssh-crypto.js"></script>
+<script src="lib/ssh/ssh-keys.js"></script>
+<script src="lib/ssh/ssh-client.js"></script>
+<script src="lib/ssh/sftp-client.js"></script>
+<script src="lib/ssh/app.js"></script>
+</body>
+</html>

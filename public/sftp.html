@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SFTP 文件管理</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #11111b; color: #cdd6f4; display: flex; flex-direction: column;
+    font-size: 13px;
+  }
+
+  /* ===== 工具栏 ===== */
+  #toolbar {
+    flex: 0 0 auto; background: #181825; border-bottom: 1px solid #313244;
+    padding: 6px 8px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  }
+  #toolbar button {
+    background: #313244; border: 1px solid #585b70; color: #cdd6f4; border-radius: 4px;
+    padding: 5px 10px; font-size: 12px; cursor: pointer; height: 28px; white-space: nowrap;
+  }
+  #toolbar button:hover { background: #45475a; border-color: #89b4fa; }
+  #toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #toolbar .sep { width: 1px; height: 20px; background: #313244; margin: 0 2px; }
+
+  /* 路径栏 */
+  #pathbar {
+    flex: 1; display: flex; align-items: center; gap: 2px; overflow: hidden;
+    background: #11111b; border: 1px solid #45475a; border-radius: 4px; height: 28px;
+    padding: 0 6px;
+  }
+  #pathbar input {
+    flex: 1; background: none; border: none; color: #cdd6f4; font-size: 12px;
+    font-family: Consolas, monospace; outline: none; min-width: 100px;
+  }
+  #pathbar button {
+    background: none; border: none; color: #89b4fa; cursor: pointer; font-size: 12px;
+    padding: 0 4px; height: 28px;
+  }
+  #pathbar button:hover { color: #f5e0dc; }
+
+  /* ===== 文件列表 ===== */
+  #filelist-wrap {
+    flex: 1 1 auto; min-height: 0; overflow: auto; background: #11111b;
+  }
+  #filelist {
+    width: 100%; border-collapse: collapse;
+  }
+  #filelist th {
+    position: sticky; top: 0; z-index: 1; background: #181825;
+    border-bottom: 1px solid #313244; padding: 6px 8px; text-align: left;
+    font-size: 11px; font-weight: 600; color: #89b4fa; cursor: pointer;
+    user-select: none;
+  }
+  #filelist th:hover { color: #f5e0dc; }
+  #filelist td {
+    padding: 4px 8px; border-bottom: 1px solid rgba(49,50,68,0.3);
+    font-size: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #filelist tr:hover { background: rgba(137,180,250,0.06); }
+  #filelist tr.selected { background: rgba(137,180,250,0.15); }
+  #filelist td.icon { width: 24px; text-align: center; }
+  #filelist td.size { width: 80px; text-align: right; font-family: Consolas, monospace; color: #a6adc8; }
+  #filelist td.date { width: 130px; color: #7f849c; font-family: Consolas, monospace; }
+  .icon-dir { color: #f9e2af; }
+  .icon-file { color: #89b4fa; }
+  .icon-link { color: #f5c2e7; }
+
+  /* 拖放高亮 */
+  #filelist-wrap.dragover { background: rgba(137,180,250,0.1); outline: 2px dashed #89b4fa; outline-offset: -4px; }
+
+  /* ===== 状态栏 ===== */
+  #statusbar {
+    flex: 0 0 auto; background: #181825; border-top: 1px solid #313244;
+    padding: 4px 8px; font-size: 11px; color: #7f849c; display: flex; gap: 12px;
+  }
+  #statusbar .msg { flex: 1; }
+  #statusbar .count { color: #89b4fa; }
+
+  /* 上传进度 */
+  #progress-overlay {
+    display: none; position: fixed; bottom: 28px; left: 8px; right: 8px;
+    background: #1e1e2e; border: 1px solid #45475a; border-radius: 6px;
+    padding: 10px 14px; z-index: 100; max-height: 200px; overflow-y: auto;
+  }
+  #progress-overlay.show { display: block; }
+  .prog-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+  .prog-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prog-item .bar { width: 120px; height: 8px; background: #313244; border-radius: 4px; overflow: hidden; }
+  .prog-item .bar-fill { height: 100%; background: #89b4fa; transition: width 0.2s; }
+  .prog-item .pct { width: 40px; text-align: right; color: #a6adc8; font-family: Consolas, monospace; }
+  .prog-item.done .bar-fill { background: #a6e3a1; }
+  .prog-item.err .bar-fill { background: #f38ba8; }
+
+  /* 空状态 */
+  #empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; color: #585b70; gap: 8px;
+  }
+  #empty-state .big { font-size: 28px; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <button id="btn-up" title="上级目录">↑</button>
+  <button id="btn-refresh" title="刷新">⟳</button>
+  <div class="sep"></div>
+  <div id="pathbar">
+    <button id="btn-go" title="跳转">→</button>
+    <input id="path-input" type="text" spellcheck="false" value="/">
+  </div>
+  <div class="sep"></div>
+  <button id="btn-mkdir" title="新建目录">📁+</button>
+  <button id="btn-delete" title="删除选中" disabled>🗑</button>
+  <button id="btn-download" title="下载选中" disabled>⬇</button>
+  <button id="btn-upload" title="上传文件">⬆</button>
+  <input id="file-upload" type="file" multiple style="display:none">
+  <button id="btn-upload-dir" title="上传目录">📂⬆</button>
+  <input id="dir-upload" type="file" webkitdirectory multiple style="display:none">
+</div>
+
+<div id="filelist-wrap">
+  <table id="filelist">
+    <thead>
+      <tr>
+        <th class="icon"></th>
+        <th class="name">名称</th>
+        <th class="size">大小</th>
+        <th class="date">修改时间</th>
+      </tr>
+    </thead>
+    <tbody id="filelist-body"></tbody>
+  </table>
+  <div id="empty-state" style="display:none">
+    <div class="big">📂</div>
+    <div>空目录</div>
+  </div>
+</div>
+
+<div id="progress-overlay"></div>
+
+<div id="statusbar">
+  <div class="msg" id="status-msg">就绪</div>
+  <div class="count" id="item-count">0 项</div>
+</div>
+
+<script src="lib/ssh/ssh-util.js"></script>
+<script src="lib/ssh/ssh-crypto.js"></script>
+<script src="lib/ssh/ssh-keys.js"></script>
+<script src="lib/ssh/ssh-client.js"></script>
+<script src="lib/ssh/sftp-client.js"></script>
+<script src="lib/ssh/sftp-app.js"></script>
+</body>
+</html>
