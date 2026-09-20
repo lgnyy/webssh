@@ -523,8 +523,12 @@
 
   /* ================= UI 状态切换 ================= */
   function setFormConnectedUI(on) {
-    [els.wsurl, els.svraddr, els.username, els.password, els.keyfile, els.keypassphrase,
-      els.tabPassword, els.tabKey, els.btnConfig].forEach(function (el) { el.disabled = on; });
+    //[els.wsurl, els.svraddr, els.username, els.password, els.keyfile, els.keypassphrase,
+    //  els.tabPassword, els.tabKey, els.btnConfig].forEach(function (el) { el.disabled = on; });
+    [$('f-wsurl'), $('f-svraddr'), $('f-user'), $('f-auth-mode'), $('f-password'), $('f-keyfile'), $('f-keypass')].forEach(function (el) 
+      { 
+        el.style.display = on ? 'none' : ''; 
+    });
     if (on) {
       els.btnConnect.textContent = '断 开';
       els.btnConnect.classList.add('disconnect');
