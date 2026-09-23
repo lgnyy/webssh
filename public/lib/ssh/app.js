@@ -533,7 +533,7 @@
     }
     ellist.forEach(function (el) { 
         el.style.display = on ? 'none' : ''; 
-    });      { 
+    });
     if (on) {
       els.btnConnect.textContent = '断 开';
       els.btnConnect.classList.add('disconnect');
