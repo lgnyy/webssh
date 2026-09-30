@@ -65,6 +65,13 @@
   #btn-sftp:hover { background: #45475a; border-color: #89b4fa; }
   #btn-sftp.active { background: #89b4fa; color: #11111b; border-color: #89b4fa; }
 
+  #btn-fwd {
+    background: #313244; border: 1px solid #585b70; color: #cdd6f4; border-radius: 4px;
+    padding: 0 14px; font-size: 13px; cursor: pointer; height: 32px; font-weight: 600;
+  }
+  #btn-fwd:hover { background: #45475a; border-color: #f9e2af; }
+  #btn-fwd.active { background: #f9e2af; color: #11111b; border-color: #f9e2af; }
+
   #status { font-size: 12px; color: #a6adc8; padding-bottom: 8px; }
   #status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #6c7086; margin-right: 5px; }
   #status.connected .dot { background: #a6e3a1; }
@@ -152,11 +159,20 @@
 
   /* ===== 终端 ===== */
   #main-area { flex: 1 1 auto; min-height: 0; display: flex; overflow: hidden; }
-  #sftp-panel {
+  #left-col {
     display: none; flex: 0 0 25%; min-width: 240px; max-width: 80%;
-    background: #11111b; border-right: 1px solid #313244;
+    flex-direction: column; background: #11111b; border-right: 1px solid #313244;
   }
+  #sftp-panel {
+    flex: 1 1 50%; min-height: 0; background: #11111b;
+  }
+  #sftp-panel.hidden { display: none; }
   #sftp-panel iframe { width: 100%; height: 100%; border: none; }
+  #fwd-panel {
+    flex: 1 1 50%; min-height: 0; background: #11111b; border-top: 1px solid #313244;
+  }
+  #fwd-panel.hidden { display: none; }
+  #fwd-panel iframe { width: 100%; height: 100%; border: none; }
   #sftp-splitter {
     display: none; flex: 0 0 5px; background: #313244; cursor: col-resize;
     user-select: none; -webkit-user-select: none;
@@ -216,6 +232,7 @@
 
   <button id="btn-connect" type="button">连 接</button>
   <button id="btn-sftp" type="button" title="切换 SFTP 文件管理器">SFTP</button>
+  <button id="btn-fwd" type="button" title="切换端口转发测试面板">转发</button>
   <div id="status"><span class="dot"></span><span id="status-text">未连接</span></div>
 </div>
 
@@ -253,8 +270,13 @@
 </div>
 
 <div id="main-area">
-  <div id="sftp-panel">
-    <iframe id="sftp-frame"></iframe>
+  <div id="left-col">
+    <div id="sftp-panel" class="hidden">
+      <iframe id="sftp-frame"></iframe>
+    </div>
+    <div id="fwd-panel" class="hidden">
+      <iframe id="fwd-frame"></iframe>
+    </div>
   </div>
   <div id="sftp-splitter"></div>
   <div id="terminal-wrap">

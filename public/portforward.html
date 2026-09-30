@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>端口转发测试</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #11111b; color: #cdd6f4; display: flex; flex-direction: column;
+    font-size: 13px;
+  }
+
+  /* ===== 模式切换 ===== */
+  #mode-bar {
+    flex: 0 0 auto; background: #181825; border-bottom: 1px solid #313244;
+    display: flex;
+  }
+  #mode-bar button {
+    flex: 1; background: none; border: none; color: #a6adc8; padding: 7px 0;
+    font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent;
+  }
+  #mode-bar button.active { color: #f9e2af; border-bottom-color: #f9e2af; font-weight: 600; }
+  #mode-bar button:hover { color: #cdd6f4; }
+
+  /* ===== 连接配置栏 ===== */
+  #conn-bar {
+    flex: 0 0 auto; background: #181825; border-bottom: 1px solid #313244;
+    padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end;
+  }
+  .fld { display: flex; flex-direction: column; gap: 2px; }
+  .fld label { font-size: 10px; color: #89b4fa; }
+  .fld input {
+    background: #11111b; border: 1px solid #45475a; border-radius: 4px; color: #cdd6f4;
+    padding: 5px 8px; font-size: 12px; outline: none; height: 28px; font-family: Consolas, monospace;
+  }
+  .fld input:focus { border-color: #f9e2af; }
+  #f-host input { width: 130px; }
+  #f-port input { width: 60px; }
+  .act-btn {
+    border: none; border-radius: 4px; padding: 0 14px; font-size: 12px;
+    font-weight: 600; cursor: pointer; height: 28px;
+  }
+  #btn-open { background: #a6e3a1; color: #11111b; }
+  #btn-open:hover { background: #94d890; }
+  #btn-open.active { background: #f38ba8; }
+  #btn-open.active:hover { background: #eb6f92; }
+  #btn-start { background: #f9e2af; color: #11111b; }
+  #btn-start:hover { background: #f0d27a; }
+  #btn-start.active { background: #f38ba8; }
+  #btn-start.active:hover { background: #eb6f92; }
+  #conn-status { font-size: 11px; color: #a6adc8; padding-bottom: 6px; }
+  #conn-status .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #6c7086; margin-right: 4px; }
+  #conn-status.open .dot { background: #a6e3a1; }
+  #conn-status.error .dot { background: #f38ba8; }
+
+  /* ===== 远程连接列表 ===== */
+  #conn-list-wrap {
+    flex: 0 0 auto; max-height: 110px; overflow-y: auto; background: #11111b;
+    border-bottom: 1px solid #313244;
+  }
+  #conn-list-wrap.hidden { display: none; }
+  #conn-list { width: 100%; border-collapse: collapse; }
+  #conn-list th {
+    position: sticky; top: 0; background: #181825; padding: 4px 8px; text-align: left;
+    font-size: 10px; color: #89b4fa; font-weight: 600; border-bottom: 1px solid #313244;
+  }
+  #conn-list td {
+    padding: 3px 8px; font-size: 11px; cursor: pointer; border-bottom: 1px solid rgba(49,50,68,0.3);
+    font-family: Consolas, monospace;
+  }
+  #conn-list tr:hover { background: rgba(249,226,175,0.08); }
+  #conn-list tr.selected { background: rgba(249,226,175,0.18); }
+  #conn-list tr.closed { color: #6c7086; }
+  #conn-list td.cid { width: 50px; color: #f9e2af; }
+  #conn-list td.origin { color: #a6adc8; }
+  #conn-list td.state { width: 50px; text-align: center; }
+  #conn-list td.act { width: 50px; text-align: center; }
+  #conn-list .del-btn {
+    background: none; border: none; color: #f38ba8; cursor: pointer; font-size: 14px;
+    padding: 0 4px; line-height: 1;
+  }
+  #conn-list .del-btn:hover { color: #eb6f92; }
+  #conn-list .del-btn:disabled { color: #45475a; cursor: not-allowed; }
+
+  /* ===== 数据收发区 ===== */
+  #io-area { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+
+  .pane { flex: 1 1 50%; min-height: 0; display: flex; flex-direction: column; }
+  .pane + .pane { border-top: 1px solid #313244; }
+  .pane-head {
+    flex: 0 0 auto; background: #181825; padding: 4px 8px; font-size: 11px;
+    color: #89b4fa; display: flex; align-items: center; gap: 8px;
+  }
+  .pane-head .recv { color: #f5c2e7; }
+  .pane-head .send { color: #a6e3a1; }
+  .pane-body { flex: 1 1 auto; min-height: 0; display: flex; }
+
+  .mode-tabs { display: flex; gap: 0; margin-left: auto; }
+  .mode-tabs button {
+    background: #11111b; border: 1px solid #45475a; color: #a6adc8; padding: 2px 8px;
+    font-size: 10px; cursor: pointer; height: 20px;
+  }
+  .mode-tabs button:first-child { border-radius: 3px 0 0 3px; }
+  .mode-tabs button:last-child { border-radius: 0 3px 3px 0; border-left: none; }
+  .mode-tabs button.active { background: #89b4fa; color: #11111b; border-color: #89b4fa; }
+
+  textarea.io-text {
+    flex: 1; background: #0d0d16; border: none; color: #cdd6f4; padding: 8px;
+    font-family: Consolas, "Cascadia Mono", monospace; font-size: 12px;
+    resize: none; outline: none; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+  }
+
+  /* 发送工具栏 */
+  #send-bar {
+    flex: 0 0 auto; background: #181825; border-top: 1px solid #313244;
+    padding: 6px 8px; display: flex; gap: 6px; align-items: center;
+  }
+  #send-bar button {
+    background: #313244; border: 1px solid #585b70; color: #cdd6f4; border-radius: 4px;
+    padding: 5px 12px; font-size: 12px; cursor: pointer; height: 28px;flex-shrink: 0; white-space: nowrap; 
+  }
+  #send-bar button:hover { background: #45475a; border-color: #a6e3a1; }
+  #send-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #send-bar .hint { font-size: 10px; color: #7f849c; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+
+  /* 状态栏 */
+  #statusbar {
+    flex: 0 0 auto; background: #181825; border-top: 1px solid #313244;
+    padding: 4px 8px; font-size: 11px; color: #7f849c; display: flex; gap: 12px;
+  }
+  #statusbar .msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #statusbar .bytes { color: #f9e2af; }
+</style>
+</head>
+<body>
+
+<!-- 模式切换 -->
+<div id="mode-bar">
+  <button id="mode-local" class="active" type="button">本地转发 (direct-tcpip)</button>
+  <button id="mode-remote" type="button">远程转发 (forwarded-tcpip)</button>
+</div>
+
+<!-- 本地转发：目标地址 -->
+<div id="conn-bar">
+  <div class="fld" id="f-host">
+    <label id="lbl-host">目标主机</label>
+    <input type="text" id="dest-host" value="127.0.0.1" spellcheck="false">
+  </div>
+  <div class="fld" id="f-port">
+    <label id="lbl-port">目标端口</label>
+    <input type="text" id="dest-port" value="80" spellcheck="false">
+  </div>
+  <button id="btn-open" class="act-btn" type="button">打 开</button>
+  <button id="btn-start" class="act-btn" type="button" style="display:none">开始监听</button>
+  <div id="conn-status"><span class="dot"></span><span id="conn-status-text">未连接</span></div>
+</div>
+
+<!-- 远程转发：连接列表 -->
+<div id="conn-list-wrap" class="hidden">
+  <table id="conn-list">
+    <thead>
+      <tr><th class="cid">#</th><th>来源地址</th><th>目标地址</th><th class="state">状态</th><th class="act">操作</th></tr>
+    </thead>
+    <tbody id="conn-list-body"></tbody>
+  </table>
+</div>
+
+<div id="io-area">
+  <!-- 接收区 -->
+  <div class="pane">
+    <div class="pane-head">
+      <span class="recv">▼ 接收数据</span>
+      <div class="mode-tabs">
+        <button id="recv-mode-hex" class="active" type="button">HEX</button>
+        <button id="recv-mode-text" type="button">文本</button>
+        <button id="recv-clear" type="button" title="清空">清</button>
+      </div>
+    </div>
+    <div class="pane-body">
+      <textarea id="recv-text" class="io-text" readonly placeholder="从端口接收到的数据将显示在这里…"></textarea>
+    </div>
+  </div>
+
+  <!-- 发送区 -->
+  <div class="pane">
+    <div class="pane-head">
+      <span class="send">▲ 发送数据</span>
+      <div class="mode-tabs">
+        <button id="send-mode-hex" class="active" type="button">HEX</button>
+        <button id="send-mode-text" type="button">文本</button>
+      </div>
+    </div>
+    <div class="pane-body">
+      <textarea id="send-text" class="io-text" placeholder="输入十六进制（如 48 65 6C 6C 6F）或切换到文本模式…"></textarea>
+    </div>
+  </div>
+</div>
+
+<div id="send-bar">
+  <button id="btn-send" type="button" disabled>发送</button>
+  <span class="hint">HEX 模式支持空格/换行分隔，自动忽略非十六进制字符</span>
+</div>
+
+<div id="statusbar">
+  <div class="msg" id="status-msg">就绪</div>
+  <div class="bytes">收: <span id="rx-bytes">0</span> B　发: <span id="tx-bytes">0</span> B</div>
+</div>
+
+<script src="lib/ssh/ssh-util.js"></script>
+<script src="lib/ssh/portforward-app.js"></script>
+</body>
+</html>

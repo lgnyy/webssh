@@ -68,6 +68,7 @@
     this._channels = {};
     this._chanSeq = 0;
     this._closed = false;
+    this._globalQueue = Promise.resolve();
   }
 
   /* ================= 连接入口 ================= */
@@ -104,6 +105,8 @@
     self._authResolve = null;
     self._kbdResolve = null;
     self._chanReplies = {};
+    self._globalResolve = null;
+    self._globalReject = null;
 
     return self._run();
   };
@@ -118,6 +121,12 @@
       rj(err);
     } else if (this.opts.onClose) {
       this.opts.onClose(err);
+    }
+    // 拒绝挂起的全局请求（如 cancelTcpipForward），避免 Promise 永久挂起
+    if (this._globalReject) {
+      var grj = this._globalReject;
+      this._globalResolve = this._globalReject = null;
+      grj(err);
     }
     Object.keys(this._chanReplies).forEach((function (map) {
       return function (k) {
@@ -589,11 +598,64 @@
         }
         return;
       }
+      case MSG.REQUEST_SUCCESS: {
+        if (self._globalResolve) {
+          var grs = self._globalResolve;
+          self._globalResolve = self._globalReject = null;
+          grs(body); // body 可能携带附加数据（如 tcpip-forward 的端口）
+        }
+        return;
+      }
+      case MSG.REQUEST_FAILURE: {
+        if (self._globalReject) {
+          var grj = self._globalReject;
+          self._globalResolve = self._globalReject = null;
+          grj(new Error('全局请求被服务器拒绝'));
+        }
+        return;
+      }
       case MSG.CHANNEL_OPEN: {
-        // 不接受服务器反向通道
         var or2 = new U.Reader(body);
-        U.bytesToStr(or2.string());
+        var chType = U.bytesToStr(or2.string());
         var theirChan = or2.uint32();
+
+        // 远程端口转发：服务器在监听端口收到连接后，主动打开 forwarded-tcpip 通道
+        if (chType === 'forwarded-tcpip') {
+          var remoteWindow = or2.uint32();   // initial window size
+          var remoteMaxPacket = or2.uint32(); // maximum packet size
+          var connectedAddr = U.bytesToStr(or2.string());
+          var connectedPort = or2.uint32();
+          var originAddr = U.bytesToStr(or2.string());
+          var originPort = or2.uint32();
+
+          var localId = self._chanSeq++;
+          var fch = self._makeChannel(localId, theirChan, {});
+          fch.remoteWindow = remoteWindow;
+          fch.remoteMaxPacket = remoteMaxPacket;
+          self._channels[localId] = fch;
+
+          // 回复 CHANNEL_OPEN_CONFIRMATION
+          var ocw = new U.Writer();
+          ocw.byte(MSG.CHANNEL_OPEN_CONFIRMATION).uint32(theirChan).uint32(localId)
+            .uint32(fch.window).uint32(fch.maxPacket);
+          await self._sendPayload(ocw.buffer());
+
+          var info = {
+            connectedAddr: connectedAddr,
+            connectedPort: connectedPort,
+            originAddr: originAddr,
+            originPort: originPort
+          };
+          if (self.opts.onForwardedTcpip) {
+            self.opts.onForwardedTcpip(fch, info);
+          } else {
+            // 没有注册处理器，立即关闭
+            try { fch.close(); } catch (e) { }
+          }
+          return;
+        }
+
+        // 其他服务器发起的通道：拒绝
         var w3 = new U.Writer();
         w3.byte(MSG.CHANNEL_OPEN_FAILURE).uint32(theirChan).uint32(3) // ADMINISTRATIVELY_PROHIBITED
           .string('not allowed').string('');
@@ -943,13 +1005,12 @@
   };
 
   /* ================= Channel ================= */
-  SSHClient.prototype._openChannel = function (kind, opts, cbs) {
+  // 构造通用通道对象（客户端发起 / 服务端发起共用），提供 sendData / close / 窗口管理
+  SSHClient.prototype._makeChannel = function (localId, remoteId, cbs) {
     var self = this;
-    opts = opts || {};
-    var localId = self._chanSeq++;
     var ch = {
       localId: localId,
-      remoteId: -1,
+      remoteId: remoteId,
       window: 2 * 1024 * 1024,
       maxPacket: 32768,
       remoteWindow: 0,
@@ -966,7 +1027,6 @@
         });
       }
     };
-    self._channels[localId] = ch;
 
     ch.sendData = function (data) {
       if (ch.closed) return Promise.resolve();
@@ -993,10 +1053,32 @@
 
     ch.close = function () {
       if (ch.closed) return Promise.resolve();
+      ch.closed = true;
+      // 立即通知上层（UI 快速更新）
+      if (ch.cbs.onClose) {
+        try { ch.cbs.onClose(); } catch (e) { }
+        ch.cbs.onClose = null;
+      }
+      // 拒绝等待窗口的发送者，避免 sendData 永久挂起
+      if (ch.windowWaiters && ch.windowWaiters.length) {
+        var pend = ch.windowWaiters; ch.windowWaiters = [];
+        pend.forEach(function (wtr) { wtr.reject(new Error('通道已关闭')); });
+      }
+      if (ch.remoteId < 0) return Promise.resolve();
       var w = new U.Writer();
       w.byte(MSG.CHANNEL_CLOSE).uint32(ch.remoteId);
       return self._sendPayload(w.buffer());
     };
+
+    return ch;
+  };
+
+  SSHClient.prototype._openChannel = function (kind, opts, cbs) {
+    var self = this;
+    opts = opts || {};
+    var localId = self._chanSeq++;
+    var ch = self._makeChannel(localId, -1, cbs || {});
+    self._channels[localId] = ch;
 
     // 统一发送一个 CHANNEL_REQUEST 并等待 SUCCESS
     function request(reqType, bodyFn) {
@@ -1023,11 +1105,21 @@
     }
 
     return (async function () {
-      // 1. 打开 session 通道（所有类型都一样）
+      // 1. 打开通道
       var openP = self._waitChanReply('open-' + localId);
       var ow = new U.Writer();
-      ow.byte(MSG.CHANNEL_OPEN).string('session').uint32(localId)
-        .uint32(ch.window).uint32(ch.maxPacket);
+      if (kind === 'direct-tcpip') {
+        // 端口转发（本地转发）：直接在 CHANNEL_OPEN 中携带目标地址
+        ow.byte(MSG.CHANNEL_OPEN).string('direct-tcpip').uint32(localId)
+          .uint32(ch.window).uint32(ch.maxPacket)
+          .string(U.strToBytes(opts.destHost || '127.0.0.1'))
+          .uint32(opts.destPort || 0)
+          .string(U.strToBytes(opts.originHost || '127.0.0.1'))
+          .uint32(opts.originPort || 0);
+      } else {
+        ow.byte(MSG.CHANNEL_OPEN).string('session').uint32(localId)
+          .uint32(ch.window).uint32(ch.maxPacket);
+      }
       await self._sendPayload(ow.buffer());
       var openRes = await openP;
       if (openRes.type !== MSG.CHANNEL_OPEN_CONFIRMATION) {
@@ -1037,7 +1129,7 @@
       ch.remoteWindow = openRes.remoteWindow;
       ch.remoteMaxPacket = openRes.remoteMaxPacket;
 
-      // 2. 按 kind 发请求
+      // 2. 按 kind 发请求（direct-tcpip 无需后续请求）
       if (kind === 'shell') {
         await request('pty-req', function (w) {
           w.string(opts.term || 'xterm-256color')
@@ -1048,6 +1140,8 @@
         await request('shell', null);
       } else if (kind === 'sftp') {
         await request('subsystem', function (w) { w.string('sftp'); });
+      } else if (kind === 'direct-tcpip') {
+        // direct-tcpip 通道在 OPEN 成功后即可收发数据，无需额外请求
       } else {
         throw new Error('未知通道类型: ' + kind);
       }
@@ -1065,6 +1159,71 @@
 
   SSHClient.prototype.openSftp = function (cbs) {
     return this._openChannel('sftp', null, cbs);
+  };
+
+  // 端口转发（本地转发）：通过 SSH 隧道连接到 destHost:destPort
+  // opts: { destHost, destPort, originHost?, originPort? }
+  // cbs: { onData(data Uint8Array), onClose() }
+  // 返回 channel 对象，提供 sendData(data)/close() 方法
+  SSHClient.prototype.openDirectTcpip = function (opts, cbs) {
+    return this._openChannel('direct-tcpip', opts || {}, cbs || {});
+  };
+
+  /* ================= 全局请求（Global Request） ================= */
+  // 发送一个 SSH_MSG_GLOBAL_REQUEST 并（可选）等待 REQUEST_SUCCESS/FAILURE
+  // SSH 协议规定：需回复的全局请求应顺序处理，这里用单一 waiter 串行化。
+  SSHClient.prototype._sendGlobalRequest = function (reqType, bodyFn, wantReply) {
+    var self = this;
+    wantReply = wantReply !== false;
+    var run = function () {
+      var p;
+      if (wantReply) {
+        p = new Promise(function (resolve, reject) {
+          self._globalResolve = resolve;
+          self._globalReject = reject;
+        });
+      } else {
+        p = Promise.resolve();
+      }
+      var w = new U.Writer();
+      w.byte(MSG.GLOBAL_REQUEST).string(reqType).bool(wantReply);
+      if (bodyFn) bodyFn(w);
+      self._sendPayload(w.buffer()).catch(function (e) {
+        if (self._globalReject) {
+          var rj = self._globalReject;
+          self._globalResolve = self._globalReject = null;
+          rj(e);
+        }
+      });
+      return p;
+    };
+    // 串行化：前一个全局请求（含其响应）完成后才发下一个
+    var next = self._globalQueue.then(run, run);
+    self._globalQueue = next.catch(function () { });
+    return next;
+  };
+
+  // 远程端口转发：请求服务器在 bindAddr:bindPort 上监听
+  // bindPort=0 时由服务器分配端口，返回 { port: 实际端口 }
+  SSHClient.prototype.requestTcpipForward = function (bindAddr, bindPort) {
+    var self = this;
+    return self._sendGlobalRequest('tcpip-forward', function (w) {
+      w.string(U.strToBytes(bindAddr || '')).uint32(bindPort || 0);
+    }).then(function (body) {
+      // 仅当客户端请求端口 0 时，服务器在 REQUEST_SUCCESS 中返回实际端口
+      if (body && body.length >= 4) {
+        var port = new DataView(body.buffer, body.byteOffset, 4).getUint32(0);
+        return { port: port };
+      }
+      return { port: bindPort || 0 };
+    });
+  };
+
+  // 取消远程端口转发（wantReply=true，等待服务器确认端口已关闭）
+  SSHClient.prototype.cancelTcpipForward = function (bindAddr, bindPort) {
+    return this._sendGlobalRequest('cancel-tcpip-forward', function (w) {
+      w.string(U.strToBytes(bindAddr || '')).uint32(bindPort || 0);
+    });
   };
 
 
@@ -1124,14 +1283,22 @@
         if (!ch) return;
         if (type === MSG.CHANNEL_EXTENDED_DATA) r.uint32(); // code (1=stderr)
         var data = r.string();
-        if (ch.cbs.onData) ch.cbs.onData(data, type === MSG.CHANNEL_EXTENDED_DATA);
+        if (ch.cbs.onData) {
+          try { ch.cbs.onData(data, type === MSG.CHANNEL_EXTENDED_DATA); } catch (e) { }
+        }
+        // 窗口调节：累计收到一定字节后向服务器回赠窗口，避免服务器发送窗口耗尽
         ch.recvUnacked += data.length;
-        if (ch.recvUnacked >= ch.window / 2) {
+        var threshold = Math.min(ch.window / 2, 16 * 1024);
+        if (ch.recvUnacked >= threshold) {
           var bytes = ch.recvUnacked;
-          ch.recvUnacked = 0;
           var w = new U.Writer();
           w.byte(MSG.CHANNEL_WINDOW_ADJUST).uint32(ch.remoteId).uint32(bytes);
-          await self._sendPayload(w.buffer());
+          try {
+            await self._sendPayload(w.buffer());
+            ch.recvUnacked = 0; // 仅在发送成功后清零
+          } catch (e) {
+            // 发送失败时保留 recvUnacked，下次数据到达时重试
+          }
         }
         return;
       }
@@ -1140,6 +1307,16 @@
         return;
       case MSG.CHANNEL_CLOSE: {
         if (ch) {
+          if (ch.closed) {
+            // 已标记关闭（例如本地主动关闭），仍需通知一次上层，
+            // 否则 iframe 里的连接状态不会更新
+            if (ch.cbs.onClose) {
+              try { ch.cbs.onClose(); } catch (e) { }
+              ch.cbs.onClose = null;   // 防止重复通知
+            }
+            delete self._channels[ch.localId];
+            return;
+          }
           ch.closed = true;
           if (ch.windowWaiters && ch.windowWaiters.length) {
             var pend = ch.windowWaiters; ch.windowWaiters = [];
@@ -1147,11 +1324,15 @@
               wtr.reject(new Error('通道已关闭'));
             });
           }
-          // 回复 CLOSE
-          var wc = new U.Writer();
-          wc.byte(MSG.CHANNEL_CLOSE).uint32(ch.remoteId);
-          await self._sendPayload(wc.buffer());
-          if (ch.cbs.onClose) ch.cbs.onClose();
+          if (ch.remoteId >= 0) {
+            var wc = new U.Writer();
+            wc.byte(MSG.CHANNEL_CLOSE).uint32(ch.remoteId);
+            await self._sendPayload(wc.buffer());
+          }
+          if (ch.cbs.onClose) {
+            try { ch.cbs.onClose(); } catch (e) { }
+            ch.cbs.onClose = null;
+          }
           delete self._channels[ch.localId];
         }
         return;

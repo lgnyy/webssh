@@ -34,9 +34,14 @@
     tip: $('tip'),
     // SFTP 面板
     btnSftp: $('btn-sftp'),
+    leftCol: $('left-col'),
     sftpPanel: $('sftp-panel'),
     sftpFrame: $('sftp-frame'),
     sftpSplitter: $('sftp-splitter'),
+    // 端口转发面板
+    btnFwd: $('btn-fwd'),
+    fwdPanel: $('fwd-panel'),
+    fwdFrame: $('fwd-frame'),
     // 配置弹窗
     configOverlay: $('config-overlay'),
     configClose: $('config-close'),
@@ -65,6 +70,13 @@
   // SFTP 状态
   let sftpEnabled = false;
   let sftpClient = null;
+
+  // 端口转发状态
+  let fwdEnabled = false;
+  let fwdChannels = {}; // id -> channel（本地转发 direct-tcpip）
+  // 远程转发状态
+  let remoteFwdListeners = {}; // listenerId -> { bindAddr, bindPort }
+  let remoteFwdChannels = {};  // connId -> channel
 
   /* ================= localStorage ================= */
   const SRV_KEY = 'wssh.servers';
@@ -264,7 +276,37 @@
     selectedKeyFile = els.keyfile.files && els.keyfile.files[0] ? els.keyfile.files[0] : null;
   });
 
-  /* ================= SFTP 面板控制 ================= */
+  /* ================= 左侧面板控制（SFTP + 端口转发） ================= */
+  // 根据 sftpEnabled / fwdEnabled 刷新左侧列可见性与分隔条
+  function refreshLeftCol() {
+    let anyOpen = sftpEnabled || fwdEnabled;
+    els.leftCol.style.display = anyOpen ? 'flex' : 'none';
+    els.sftpSplitter.style.display = anyOpen ? 'block' : 'none';
+    if (anyOpen) {
+      let savedW = storeGet('wssh.sftpW');
+      if (savedW && /^(\d+(px|%))$/.test(savedW)) {
+        els.leftCol.style.flex = '0 0 ' + savedW;
+      } else {
+        els.leftCol.style.flex = '';
+      }
+    }
+    // SFTP 与转发面板各自显示/隐藏，并在只有一个时占满整列
+    let count = (sftpEnabled ? 1 : 0) + (fwdEnabled ? 1 : 0);
+    if (sftpEnabled) {
+      els.sftpPanel.classList.remove('hidden');
+      els.sftpPanel.style.flex = count > 1 ? '1 1 50%' : '1 1 auto';
+    } else {
+      els.sftpPanel.classList.add('hidden');
+    }
+    if (fwdEnabled) {
+      els.fwdPanel.classList.remove('hidden');
+      els.fwdPanel.style.flex = count > 1 ? '1 1 50%' : '1 1 auto';
+    } else {
+      els.fwdPanel.classList.add('hidden');
+    }
+    scheduleResize(true);
+  }
+
   function toggleSftp() {
     if (!connected) {
       setStatus('error', '请先建立 SSH 连接');
@@ -273,53 +315,62 @@
     sftpEnabled = !sftpEnabled;
     if (sftpEnabled) {
       els.btnSftp.classList.add('active');
-      // 恢复保存的宽度（默认 25%）
-      let savedW = storeGet('wssh.sftpW');
-      if (savedW && /^(\d+(px|%))$/.test(savedW)) {
-        els.sftpPanel.style.flex = '0 0 ' + savedW;
-      } else {
-        els.sftpPanel.style.flex = '';
-      }
-      els.sftpPanel.style.display = 'flex';
-      els.sftpSplitter.style.display = 'block';
       els.sftpFrame.src = 'sftp.html';
     } else {
       els.btnSftp.classList.remove('active');
-      els.sftpPanel.style.display = 'none';
-      els.sftpSplitter.style.display = 'none';
       els.sftpFrame.src = 'about:blank';
     }
-    scheduleResize(true);
+    refreshLeftCol();
   }
   els.btnSftp.addEventListener('click', toggleSftp);
 
-  /* ---- SFTP 分隔条拖拽（调整宽度） ---- */
+  function toggleFwd() {
+    if (!connected) {
+      setStatus('error', '请先建立 SSH 连接');
+      return;
+    }
+    fwdEnabled = !fwdEnabled;
+    if (fwdEnabled) {
+      els.btnFwd.classList.add('active');
+      // 只在 iframe 未加载时设置 src（复用已有 iframe 保留历史）
+      if (!els.fwdFrame.src || els.fwdFrame.src === 'about:blank') {
+        els.fwdFrame.src = 'portforward.html';
+      }
+    } else {
+      els.btnFwd.classList.remove('active');
+      // 不重载 iframe，保留历史
+    }
+    refreshLeftCol();
+  }
+  els.btnFwd.addEventListener('click', toggleFwd);
+
+  /* ---- 左侧列分隔条拖拽（调整宽度） ---- */
   (function setupSplitter() {
     let dragging = false;
     let startX = 0;
     let startW = 0;
 
     els.sftpSplitter.addEventListener('mousedown', function (ev) {
-      if (!sftpEnabled) return;
+      if (!sftpEnabled && !fwdEnabled) return;
       ev.preventDefault();
       dragging = true;
       els.sftpSplitter.classList.add('dragging');
       startX = ev.clientX;
       // 用 px 计算更稳定
-      startW = els.sftpPanel.getBoundingClientRect().width;
+      startW = els.leftCol.getBoundingClientRect().width;
       document.body.style.cursor = 'col-resize';
       document.body.style.userSelect = 'none';
     });
     document.addEventListener('mousemove', function (ev) {
       if (!dragging) return;
-      // 拖拽分隔条：向右拖 = 增大 SFTP 面板
+      // 拖拽分隔条：向右拖 = 增大左侧列
       let delta = ev.clientX - startX;
       let newW = startW + delta;
-      let mainW = els.sftpPanel.parentElement.getBoundingClientRect().width;
+      let mainW = els.leftCol.parentElement.getBoundingClientRect().width;
       let minW = 240, maxW = Math.max(minW, mainW * 0.8);
       if (newW < minW) newW = minW;
       if (newW > maxW) newW = maxW;
-      els.sftpPanel.style.flex = '0 0 ' + newW + 'px';
+      els.leftCol.style.flex = '0 0 ' + newW + 'px';
       scheduleResize(false);
     });
     document.addEventListener('mouseup', function () {
@@ -329,7 +380,7 @@
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       // 持久化宽度
-      let w = els.sftpPanel.getBoundingClientRect().width;
+      let w = els.leftCol.getBoundingClientRect().width;
       if (w) storeSet('wssh.sftpW', Math.round(w) + 'px');
       scheduleResize(true);
     });
@@ -380,6 +431,213 @@
       svraddr: els.svraddr.value.trim()
     };
   };
+
+  /* ================= 端口转发通道管理 ================= */
+  let fwdSeq = 0;
+
+  // 打开一条端口转发通道，返回 forwardId
+  window._wssh_openForward = async function (destHost, destPort) {
+    if (!connected || !client) throw new Error('SSH 未连接');
+    let id = ++fwdSeq;
+    let ch = await client.openDirectTcpip(
+      { destHost: destHost, destPort: destPort, originHost: '127.0.0.1', originPort: 0 },
+      {
+        onData: function (data) {
+          // 推送数据到 iframe（以十六进制字符串传输，避免二进制跨域序列化问题）
+          let hex = WSSH.util.hex(data);
+          try {
+            els.fwdFrame.contentWindow.postMessage(
+              { type: 'fwd-event', id: id, event: 'data', hex: hex }, '*');
+          } catch (e) { }
+        },
+        onClose: function () {
+          delete fwdChannels[id];
+          try {
+            els.fwdFrame.contentWindow.postMessage(
+              { type: 'fwd-event', id: id, event: 'close' }, '*');
+          } catch (e) { }
+        }
+      }
+    );
+    fwdChannels[id] = ch;
+    return id;
+  };
+
+  function hexToBytes(hex) {
+    hex = String(hex).replace(/[^0-9a-fA-F]/g, '');
+    let arr = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < arr.length; i++) {
+      arr[i] = parseInt(hex.substr(i * 2, 2), 16);
+    }
+    return arr;
+  }
+
+  window._wssh_sendForward = async function (id, hex) {
+    let ch = fwdChannels[id];
+    if (!ch || ch.closed) throw new Error('转发通道不存在或已关闭');
+    await ch.sendData(hexToBytes(hex));
+  };
+
+  window._wssh_closeForward = function (id) {
+    let ch = fwdChannels[id];
+    if (ch) {
+      delete fwdChannels[id];
+      try { ch.close(); } catch (e) { }
+    }
+  };
+
+  /* ================= 远程转发（Remote Forwarding） ================= */
+  let remoteFwdSeq = 0;
+  let remoteConnSeq = 0;
+
+  // 向转发 iframe 推送事件 
+  function postFwdEvent(evt) {
+    try { els.fwdFrame.contentWindow.postMessage(evt, '*'); } catch (e) { }
+  }
+
+  // 服务器侧监听端口收到新连接时回调
+  function handleForwardedTcpip(ch, info) {
+    let connId = ++remoteConnSeq;
+    remoteFwdChannels[connId] = ch;
+
+    let notified = false;
+    function notifyClose(reason) {
+      if (notified) return;
+      notified = true;
+      delete remoteFwdChannels[connId];
+      postFwdEvent({
+        type: 'fwd-event', remote: true, connId: String(connId),
+        event: 'close', reason: reason || ''
+      });
+    }
+
+    ch.cbs.onData = function (data) {
+      postFwdEvent({ type: 'fwd-event', remote: true, connId: String(connId), event: 'data', hex: WSSH.util.hex(data) });
+    };
+    ch.cbs.onEOF = function () {
+      // EOF 是半关闭：对端不再发数据，但通道仍可向对端发送，不删除通道
+      postFwdEvent({
+        type: 'fwd-event', remote: true, connId: String(connId), event: 'eof'
+      });
+    };
+    ch.cbs.onClose = function () {
+      notifyClose('close');
+    };
+
+    postFwdEvent({
+      type: 'fwd-event', remote: true, connId: connId, event: 'open',
+      info: {
+        connectedAddr: info.connectedAddr,
+        connectedPort: info.connectedPort,
+        originAddr: info.originAddr,
+        originPort: info.originPort
+      }
+    });
+  }
+
+  // 启动远程端口转发：请求服务器在 bindAddr:bindPort 监听
+  window._wssh_startRemoteForward = async function (bindAddr, bindPort) {
+    if (!connected || !client) throw new Error('SSH 未连接');
+    let res = await client.requestTcpipForward(bindAddr || '', bindPort || 0);
+    if (!res || typeof res.port !== 'number') {
+      throw new Error('服务器未返回有效的监听端口');
+    }
+    let listenerId = ++remoteFwdSeq;
+    remoteFwdListeners[listenerId] = { bindAddr: bindAddr || '', bindPort: res.port };
+    return { listenerId: listenerId, port: res.port };
+  };
+
+  // 停止远程端口转发
+  window._wssh_stopRemoteForward = async function (listenerId) {
+    let l = remoteFwdListeners[listenerId];
+    if (!l) {
+      // 记录丢失：尝试取消所有已知监听
+      let keys = Object.keys(remoteFwdListeners);
+      if (keys.length === 0) {
+        postFwdEvent({ type: 'fwd-event', remote: true, event: 'reset' });
+        return;
+      }
+      for (let k of keys) {
+        let it = remoteFwdListeners[k];
+        try {
+          await client.cancelTcpipForward(it.bindAddr, it.bindPort);
+        } catch (e) {
+          console.warn('cancel failed', it, e);
+        }
+        delete remoteFwdListeners[k];
+      }
+      postFwdEvent({ type: 'fwd-event', remote: true, event: 'reset' });
+      return;
+    }
+    // 先关闭所有已建立的远程连接通道（ch.close() 会同步触发 onClose 通知 UI）
+    let closePromises = Object.keys(remoteFwdChannels).map(function (cid) {
+      let ch = remoteFwdChannels[cid];
+      delete remoteFwdChannels[cid];
+      if (!ch || ch.closed) return Promise.resolve();
+      try { return ch.close(); } catch (e) { return Promise.resolve(); }
+    });
+    await Promise.all(closePromises);
+
+    // 再发送 cancel-tcpip-forward，等待服务器确认端口已停止监听
+    await client.cancelTcpipForward(l.bindAddr, l.bindPort);
+    delete remoteFwdListeners[listenerId];
+  };
+
+  window._wssh_sendRemote = async function (connId, hex) {
+    let ch = remoteFwdChannels[connId];
+    if (!ch || ch.closed) throw new Error('远程连接不存在或已关闭');
+    await ch.sendData(hexToBytes(hex));
+  };
+
+  window._wssh_closeRemote = function (connId) {
+    let ch = remoteFwdChannels[connId];
+    if (ch) {
+      delete remoteFwdChannels[connId];
+      try { ch.close(); } catch (e) { }
+    }
+  };
+
+  // iframe 通过 postMessage 调用转发方法
+  // 协议：{type:'fwd-call', id, method, args} → {type:'fwd-result', id, ok, result|error}
+  window.addEventListener('message', async function (ev) {
+    let data = ev.data;
+    if (!data || data.type !== 'fwd-call') return;
+    let msgId = data.id;
+    let reply = function (ok, payload) {
+      let resp = { type: 'fwd-result', id: msgId, ok: ok };
+      if (ok) resp.result = payload;
+      else resp.error = payload;
+      try { ev.source.postMessage(resp, '*'); } catch (e) { }
+    };
+    try {
+      let result;
+      if (data.method === 'open') {
+        result = await window._wssh_openForward(data.args[0], data.args[1]);
+      } else if (data.method === 'send') {
+        await window._wssh_sendForward(data.args[0], data.args[1]);
+        result = null;
+      } else if (data.method === 'close') {
+        window._wssh_closeForward(data.args[0]);
+        result = null;
+      } else if (data.method === 'startRemote') {
+        result = await window._wssh_startRemoteForward(data.args[0], data.args[1]);
+      } else if (data.method === 'stopRemote') {
+        await window._wssh_stopRemoteForward(data.args[0]);
+        result = null;
+      } else if (data.method === 'sendRemote') {
+        await window._wssh_sendRemote(data.args[0], data.args[1]);
+        result = null;
+      } else if (data.method === 'closeRemote') {
+        window._wssh_closeRemote(data.args[0]);
+        result = null;
+      } else {
+        throw new Error('未知转发方法: ' + data.method);
+      }
+      reply(true, result);
+    } catch (e) {
+      reply(false, e.message);
+    }
+  });
 
   /* ================= xterm 初始化 ================= */
   function initTerminal() {
@@ -600,6 +858,7 @@
         privateKey: privateKey,
         onHostKey: function (info) { return confirmHostKey(svrAddr || wsUrl, info); },
         onBanner: function (msg) { if (term) term.write(msg); },
+        onForwardedTcpip: function (ch, info) { handleForwardedTcpip(ch, info); },
         onClose: function (err) { handleRemoteClose(err || null); }
       });
 
@@ -649,21 +908,59 @@
     }
   }
 
+  // 关闭所有左侧面板（SFTP + 转发）并清理通道
+  function closeAllPanels() {
+    if (sftpEnabled) {
+      sftpEnabled = false;
+      els.btnSftp.classList.remove('active');
+      els.sftpFrame.src = 'about:blank';
+    }
+    sftpClient = null;
+
+    if (fwdEnabled) {
+      // 注意：只隐藏面板，不重载 iframe，保留历史连接列表
+      fwdEnabled = false;
+      els.btnFwd.classList.remove('active');
+      // 给 iframe 发 reset 事件（标记所有 open 连接为 closed）
+      postFwdEvent({ type: 'fwd-event', remote: true, event: 'reset' });
+      // 注意：这里不设 els.fwdFrame.src = 'about:blank'
+    }
+
+    Object.keys(fwdChannels).forEach(function (id) {
+      try { fwdChannels[id].close(); } catch (e) { }
+    });
+    fwdChannels = {};
+    Object.keys(remoteFwdChannels).forEach(function (id) {
+      try { remoteFwdChannels[id].close(); } catch (e) { }
+    });
+    remoteFwdChannels = {};
+
+    // 取消所有远程端口转发监听（异步执行，不阻塞 UI 关闭）
+    let listeners = remoteFwdListeners;
+    remoteFwdListeners = {};
+    if (client && !client._closed && Object.keys(listeners).length > 0) {
+      (async function () {
+        for (let k of Object.keys(listeners)) {
+          let it = listeners[k];
+          try {
+            await client.cancelTcpipForward(it.bindAddr, it.bindPort);
+          } catch (e) {
+            console.warn('cancel remote forward failed', it, e);
+          }
+        }
+      })();
+    }
+
+    refreshLeftCol();
+  }
+
   function handleRemoteClose(err) {
     if (!connected && !connecting) return;
     connected = false;
     connecting = false;
     setFormConnectedUI(false);
     els.btnConnect.disabled = false;
-    // 关闭 SFTP
-    if (sftpEnabled) {
-      sftpEnabled = false;
-      els.btnSftp.classList.remove('active');
-      els.sftpPanel.style.display = 'none';
-      els.sftpSplitter.style.display = 'none';
-      els.sftpFrame.src = 'about:blank';
-    }
-    sftpClient = null;
+    closeAllPanels();
     if (manualClose) {
       setStatus('', '未连接');
       if (term) term.write('\r\n\x1b[90m[连接已断开]\x1b[0m\r\n');
@@ -687,20 +984,29 @@
     setTimeout(function () { client = null; ws = null; }, 0);
   }
 
-  function doDisconnect() {
+  async function cancelAllRemoteForwards() {
+    let keys = Object.keys(remoteFwdListeners);
+    for (let k of keys) {
+      let it = remoteFwdListeners[k];
+      try {
+        if (client && !client._closed) {
+          await client.cancelTcpipForward(it.bindAddr, it.bindPort);
+        }
+      } catch (e) {
+        console.warn('cancel remote forward failed', it, e);
+      }
+      delete remoteFwdListeners[k];
+    }
+  }
+
+  async function doDisconnect() {
     manualClose = true;
     connected = false;
     connecting = false;
     setFormConnectedUI(false);
     setStatus('', '未连接');
-    if (sftpEnabled) {
-      sftpEnabled = false;
-      els.btnSftp.classList.remove('active');
-      els.sftpPanel.style.display = 'none';
-      els.sftpSplitter.style.display = 'none';
-      els.sftpFrame.src = 'about:blank';
-    }
-    sftpClient = null;
+    await cancelAllRemoteForwards();
+    closeAllPanels();   
     if (channel) {
       let ch = channel;
       channel = null;
