@@ -359,7 +359,9 @@
       var eEncBody = eframe.subarray(4, 4 + eLen);
       var eMacRecv = eframe.subarray(4 + eLen, 4 + eLen + mi.len);
       var eMacCalc = await C.hmac(mi.hash, sc.macKey, U.concat(seqBytes(seq), eLenB, eEncBody));
-      if (!U.equal(eMacCalc, eMacRecv)) throw new Error('MAC 校验失败');
+      if (!U.equal(eMacCalc, eMacRecv)) {
+        throw new Error('MAC 校验失败');
+      }
       var eOff = self._inCtrBlocks;
       var ebody = await C.aesCTR(sc.key, makeCtrNonce(sc.iv, eOff), eEncBody, false);
       self._inCtrBlocks = eOff + eLen / 16;
@@ -393,7 +395,9 @@
     if (mi) {
       var macRecv = frame.subarray(4 + cLen, 4 + cLen + mi.len);
       var macCalc = await C.hmac(mi.hash, sc.macKey, U.concat(seqBytes(seq), plainAll));
-      if (!U.equal(macCalc, macRecv)) throw new Error('MAC 校验失败');
+      if (!U.equal(macCalc, macRecv)) {
+        throw new Error('MAC 校验失败');
+      }
     }
     self._seqIn++;
     return body.subarray(1, body.length - pad);
@@ -938,9 +942,10 @@
     });
   };
 
-  /* ================= Channel / Shell ================= */
-  SSHClient.prototype.openShell = function (opts, cbs) {
+  /* ================= Channel ================= */
+  SSHClient.prototype._openChannel = function (kind, opts, cbs) {
     var self = this;
+    opts = opts || {};
     var localId = self._chanSeq++;
     var ch = {
       localId: localId,
@@ -948,39 +953,42 @@
       window: 2 * 1024 * 1024,
       maxPacket: 32768,
       remoteWindow: 0,
-      recvBuf: [],
+      remoteMaxPacket: 0,
       recvUnacked: 0,
       cbs: cbs || {},
       closed: false,
-      opts: opts
+      windowWaiters: [],
+      _waitWindow: function (need) {
+        if (ch.closed) return Promise.reject(new Error('通道已关闭'));
+        if (ch.remoteWindow >= need) return Promise.resolve();
+        return new Promise(function (resolve, reject) {
+          ch.windowWaiters.push({ need: need, resolve: resolve, reject: reject });
+        });
+      }
     };
     self._channels[localId] = ch;
 
     ch.sendData = function (data) {
       if (ch.closed) return Promise.resolve();
       if (typeof data === 'string') data = U.strToBytes(data);
-      var chunks = [];
+      var maxPacket = ch.remoteMaxPacket || ch.maxPacket;
+      var hardCap = Math.max(1024, Math.min(maxPacket - 100, 32768));
       var off = 0;
-      while (off < data.length) {
-        var n = Math.min(ch.maxPacket - 100, data.length - off, 30000);
-        chunks.push(data.subarray(off, off + n));
-        off += n;
-      }
-      return chunks.reduce(function (p, c) {
-        return p.then(function () {
+      function sendNext() {
+        if (off >= data.length) return Promise.resolve();
+        return ch._waitWindow(1).then(function () {
+          if (ch.closed) throw new Error('通道已关闭');
+          var n = Math.min(hardCap, ch.remoteWindow, data.length - off);
+          if (n <= 0) return sendNext();
+          var chunk = data.subarray(off, off + n);
+          off += n;
+          ch.remoteWindow -= n;
           var w = new U.Writer();
-          w.byte(MSG.CHANNEL_DATA).uint32(ch.remoteId).string(c);
-          return self._sendPayload(w.buffer());
+          w.byte(MSG.CHANNEL_DATA).uint32(ch.remoteId).string(chunk);
+          return self._sendPayload(w.buffer()).then(sendNext);
         });
-      }, Promise.resolve());
-    };
-
-    ch.resize = function (cols, rows, width, height) {
-      if (ch.closed || ch.remoteId < 0) return Promise.resolve();
-      var w = new U.Writer();
-      w.byte(MSG.CHANNEL_REQUEST).uint32(ch.remoteId).string('window-change').bool(false)
-        .uint32(cols).uint32(rows).uint32(width || 0).uint32(height || 0);
-      return self._sendPayload(w.buffer());
+      }
+      return sendNext();
     };
 
     ch.close = function () {
@@ -990,36 +998,59 @@
       return self._sendPayload(w.buffer());
     };
 
+    // 统一发送一个 CHANNEL_REQUEST 并等待 SUCCESS
+    function request(reqType, bodyFn) {
+      var p = self._waitChanReply('req-' + localId);
+      var w = new U.Writer();
+      w.byte(MSG.CHANNEL_REQUEST).uint32(ch.remoteId).string(reqType).bool(true);
+      if (bodyFn) bodyFn(w);
+      return self._sendPayload(w.buffer()).then(function () { return p; })
+        .then(function (res) {
+          if (res.type !== MSG.CHANNEL_SUCCESS) throw new Error(reqType + ' 被拒绝');
+        });
+    }
+    ch._request = request;
+
+    // shell 通道额外提供 resize
+    if (kind === 'shell') {
+      ch.resize = function (cols, rows, width, height) {
+        if (ch.closed || ch.remoteId < 0) return Promise.resolve();
+        var w = new U.Writer();
+        w.byte(MSG.CHANNEL_REQUEST).uint32(ch.remoteId).string('window-change').bool(false)
+          .uint32(cols).uint32(rows).uint32(width || 0).uint32(height || 0);
+        return self._sendPayload(w.buffer());
+      };
+    }
+
     return (async function () {
-      // 1. 打开 session
+      // 1. 打开 session 通道（所有类型都一样）
       var openP = self._waitChanReply('open-' + localId);
       var ow = new U.Writer();
       ow.byte(MSG.CHANNEL_OPEN).string('session').uint32(localId)
         .uint32(ch.window).uint32(ch.maxPacket);
       await self._sendPayload(ow.buffer());
       var openRes = await openP;
-      if (openRes.type !== MSG.CHANNEL_OPEN_CONFIRMATION) throw new Error('打开会话通道失败');
+      if (openRes.type !== MSG.CHANNEL_OPEN_CONFIRMATION) {
+        throw new Error('打开通道失败');
+      }
       ch.remoteId = openRes.senderChannel;
       ch.remoteWindow = openRes.remoteWindow;
+      ch.remoteMaxPacket = openRes.remoteMaxPacket;
 
-      // 2. pty-req
-      var termModes = buildTerminalModes();
-      var ptyP = self._waitChanReply('req-' + localId);
-      var pw = new U.Writer();
-      pw.byte(MSG.CHANNEL_REQUEST).uint32(ch.remoteId).string('pty-req').bool(true)
-        .string(opts.term || 'xterm-256color')
-        .uint32(opts.cols || 80).uint32(opts.rows || 24)
-        .uint32(opts.width || 0).uint32(opts.height || 0)
-        .string(termModes);
-      await self._sendPayload(pw.buffer());
-      if ((await ptyP).type !== MSG.CHANNEL_SUCCESS) throw new Error('pty-req 被拒绝');
-
-      // 3. shell
-      var shP = self._waitChanReply('req-' + localId);
-      var sw = new U.Writer();
-      sw.byte(MSG.CHANNEL_REQUEST).uint32(ch.remoteId).string('shell').bool(true);
-      await self._sendPayload(sw.buffer());
-      if ((await shP).type !== MSG.CHANNEL_SUCCESS) throw new Error('shell 请求被拒绝');
+      // 2. 按 kind 发请求
+      if (kind === 'shell') {
+        await request('pty-req', function (w) {
+          w.string(opts.term || 'xterm-256color')
+            .uint32(opts.cols || 80).uint32(opts.rows || 24)
+            .uint32(opts.width || 0).uint32(opts.height || 0)
+            .string(buildTerminalModes());
+        });
+        await request('shell', null);
+      } else if (kind === 'sftp') {
+        await request('subsystem', function (w) { w.string('sftp'); });
+      } else {
+        throw new Error('未知通道类型: ' + kind);
+      }
 
       return ch;
     })().catch(function (e) {
@@ -1028,76 +1059,14 @@
     });
   };
 
-  /* ================= SFTP subsystem 通道 ================= */
+  SSHClient.prototype.openShell = function (opts, cbs) {
+    return this._openChannel('shell', opts, cbs);
+  };
+
   SSHClient.prototype.openSftp = function (cbs) {
-    var self = this;
-    var localId = self._chanSeq++;
-    var ch = {
-      localId: localId,
-      remoteId: -1,
-      window: 2 * 1024 * 1024,
-      maxPacket: 32768,
-      remoteWindow: 0,
-      recvBuf: [],
-      recvUnacked: 0,
-      cbs: cbs || {},
-      closed: false
-    };
-    self._channels[localId] = ch;
-
-    ch.sendData = function (data) {
-      if (ch.closed) return Promise.resolve();
-      if (typeof data === 'string') data = U.strToBytes(data);
-      var chunks = [];
-      var off = 0;
-      while (off < data.length) {
-        var n = Math.min(ch.maxPacket - 100, data.length - off, 30000);
-        chunks.push(data.subarray(off, off + n));
-        off += n;
-      }
-      return chunks.reduce(function (p, c) {
-        return p.then(function () {
-          var w = new U.Writer();
-          w.byte(MSG.CHANNEL_DATA).uint32(ch.remoteId).string(c);
-          return self._sendPayload(w.buffer());
-        });
-      }, Promise.resolve());
-    };
-
-    ch.close = function () {
-      if (ch.closed) return Promise.resolve();
-      var w = new U.Writer();
-      w.byte(MSG.CHANNEL_CLOSE).uint32(ch.remoteId);
-      return self._sendPayload(w.buffer());
-    };
-
-    return (async function () {
-      // 1. 打开 session 通道
-      var openP = self._waitChanReply('open-' + localId);
-      var ow = new U.Writer();
-      ow.byte(MSG.CHANNEL_OPEN).string('session').uint32(localId)
-        .uint32(ch.window).uint32(ch.maxPacket);
-      await self._sendPayload(ow.buffer());
-      var openRes = await openP;
-      if (openRes.type !== MSG.CHANNEL_OPEN_CONFIRMATION) throw new Error('打开 SFTP 通道失败');
-      ch.remoteId = openRes.senderChannel;
-      ch.remoteWindow = openRes.remoteWindow;
-
-      // 2. 请求 sftp subsystem
-      var subP = self._waitChanReply('req-' + localId);
-      var sw = new U.Writer();
-      sw.byte(MSG.CHANNEL_REQUEST).uint32(ch.remoteId).string('subsystem').bool(true)
-        .string('sftp');
-      await self._sendPayload(sw.buffer());
-      var subRes = await subP;
-      if (subRes.type !== MSG.CHANNEL_SUCCESS) throw new Error('sftp subsystem 请求被拒绝');
-
-      return ch;
-    })().catch(function (e) {
-      delete self._channels[localId];
-      throw e;
-    });
+    return this._openChannel('sftp', null, cbs);
   };
+
 
   SSHClient.prototype._waitChanReply = function (key) {
     var self = this;
@@ -1116,11 +1085,11 @@
       case MSG.CHANNEL_OPEN_CONFIRMATION: {
         var sender = r.uint32();
         var win = r.uint32();
-        r.uint32(); // max packet
+        var remoteMaxPacket  = r.uint32(); // max packet
         var key = 'open-' + recipient;
         if (self._chanReplies[key]) {
           var rs = self._chanReplies[key]; delete self._chanReplies[key];
-          rs({ type: type, senderChannel: sender, remoteWindow: win });
+          rs({ type: type, senderChannel: sender, remoteWindow: win, remoteMaxPacket: remoteMaxPacket });
         }
         return;
       }
@@ -1135,7 +1104,19 @@
         return;
       }
       case MSG.CHANNEL_WINDOW_ADJUST: {
-        if (ch) ch.remoteWindow += r.uint32();
+        if (!ch) return;
+        ch.remoteWindow += r.uint32();
+        if (ch.windowWaiters && ch.windowWaiters.length) {
+          var pend = ch.windowWaiters;
+          ch.windowWaiters = [];
+          for (var i = 0; i < pend.length; i++) {
+            if (ch.remoteWindow >= pend[i].need) {
+              pend[i].resolve();
+            } else {
+              ch.windowWaiters.push(pend[i]);  // 还不够，继续等
+            }
+          }
+        }
         return;
       }
       case MSG.CHANNEL_DATA:
@@ -1160,6 +1141,12 @@
       case MSG.CHANNEL_CLOSE: {
         if (ch) {
           ch.closed = true;
+          if (ch.windowWaiters && ch.windowWaiters.length) {
+            var pend = ch.windowWaiters; ch.windowWaiters = [];
+            pend.forEach(function (wtr) {
+              wtr.reject(new Error('通道已关闭'));
+            });
+          }
           // 回复 CLOSE
           var wc = new U.Writer();
           wc.byte(MSG.CHANNEL_CLOSE).uint32(ch.remoteId);
