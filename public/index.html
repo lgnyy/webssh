@@ -49,6 +49,12 @@
   #auth-tabs button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
   #auth-tabs button.active { background: #89b4fa; color: #11111b; border-color: #89b4fa; font-weight: 600; }
 
+  .cfg-io-btn {
+    background: #45475a; border: none; border-radius: 4px; padding: 8px 16px;
+    font-size: 13px; font-weight: 600; cursor: pointer; color: #cdd6f4;
+  }
+  .cfg-io-btn:hover { background: #585b70; }
+
   #btn-connect {
     background: #a6e3a1; color: #11111b; border: none; border-radius: 4px; padding: 7px 22px;
     font-size: 13px; font-weight: 600; cursor: pointer; height: 32px;
@@ -252,6 +258,10 @@
       <button id="btn-add-srv" type="button">＋ 添加服务器</button>
     </div>
     <div id="config-footer">
+      <button id="btn-import" class="cfg-io-btn" type="button" title="从 JSON 文件导入配置">导入</button>
+      <button id="btn-export" class="cfg-io-btn" type="button" title="导出配置为 JSON 文件">导出</button>
+      <input type="file" id="import-file" accept=".json,application/json" style="display:none">
+      <div style="flex:1"></div>
       <button id="btn-cancel-config" type="button">取消</button>
       <button id="btn-save-config" type="button">保存配置</button>
     </div>

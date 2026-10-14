@@ -19,6 +19,9 @@
     fKeyfile: $('f-keyfile'),
     fKeypass: $('f-keypass'),
     btnConnect: $('btn-connect'),
+    btnImport: $('btn-import'),
+    btnExport: $('btn-export'),
+    importFile: $('import-file'),
     btnConfig: $('btn-config'),
     status: $('status'),
     statusText: $('status-text'),
@@ -79,8 +82,6 @@
   let remoteFwdChannels = {};  // connId -> channel
 
   /* ================= localStorage ================= */
-  const SRV_KEY = 'wssh.servers';
-
   function storeGet(k) {
     try { return window.localStorage.getItem(k); } catch (e) { return null; }
   }
@@ -95,7 +96,7 @@
 
   // 加载配置
   function loadServerList() {
-    let raw = storeGet(SRV_KEY);
+    let raw = storeGet('wssh.servers');
     if (raw) {
       try {
         let arr = JSON.parse(raw);
@@ -123,7 +124,7 @@
 
   // 保存配置
   function saveServerList() {
-    storeSet(SRV_KEY, JSON.stringify(serverList));
+    storeSet('wssh.servers', JSON.stringify(serverList));
   }
 
   // 刷新下拉列表
@@ -252,6 +253,68 @@
     saveServerList();
     refreshSvrSelect(true);
     closeConfig();
+  });
+
+  /* ================= 配置导入 / 导出 ================= */
+  // 导出：把 localStorage 中的连接信息打包为 JSON 并下载
+  els.btnExport.addEventListener('click', function () {
+    let cfg = {
+      wsurl:   storeGet('wssh.wsurl')   || '',
+      servers: storeGet('wssh.servers') || '',
+      user:    storeGet('wssh.user')    || '',
+      key:     storeGet('wssh.key')     || ''
+    };
+    let blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
+    let a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'webssh-config.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    setStatus('', '配置已导出为 webssh-config.json');
+  });
+
+  // 导入：弹出文件选择框
+  els.btnImport.addEventListener('click', function () {
+    els.importFile.value = '';   // 允许重复选择同一文件
+    els.importFile.click();
+  });
+
+  // 读取所选 JSON 并写入 localStorage，然后刷新 UI
+  els.importFile.addEventListener('change', function () {
+    let file = els.importFile.files && els.importFile.files[0];
+    if (!file) return;
+    let reader = new FileReader();
+    reader.onload = function () {
+      try {
+        let cfg = JSON.parse(reader.result);
+        if (!cfg || typeof cfg !== 'object') throw new Error('配置格式错误');
+
+        if (typeof cfg.wsurl   === 'string') storeSet('wssh.wsurl',   cfg.wsurl);
+        if (typeof cfg.servers === 'string') storeSet('wssh.servers', cfg.servers);
+        if (typeof cfg.user    === 'string') storeSet('wssh.user',    cfg.user);
+        if (typeof cfg.key     === 'string') storeSet('wssh.key',     cfg.key);
+
+        // 刷新 UI
+        if (cfg.wsurl) els.wsurl.value = cfg.wsurl;
+        if (cfg.user)  els.username.value = cfg.user;
+        if (cfg.servers) {
+          loadServerList();
+          refreshSvrSelect(false);
+          renderSrvEditor();
+        }
+        if (cfg.key) {
+          selectedKeyFile = cfg.key;
+          setAuthMode('key');
+        }
+        setStatus('', '配置导入成功');
+      } catch (e) {
+        setStatus('error', '导入失败：' + e.message);
+      }
+    };
+    reader.onerror = function () { setStatus('error', '读取文件失败'); };
+    reader.readAsText(file);
   });
 
   /* ================= 状态提示 ================= */
