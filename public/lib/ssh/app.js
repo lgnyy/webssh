@@ -1108,29 +1108,31 @@
   /* ================= 启动 ================= */
   (function init() {
     loadServerList();
-    refreshSvrSelect(false);
 
+    const params = new URLSearchParams(window.location.search);
+    let svraddr = params.get('svraddr');
+    let authmode = params.get('authmode');
+    let user = params.get('user');
+    if (svraddr) {
+      serverList.push({ name: svraddr, addr: svraddr, user: user });
+    }
+    if (authmode) {
+      setAuthMode(authmode);
+    }
+  
+    refreshSvrSelect(false);
+    
     let savedUrl = storeGet('wssh.wsurl');
-    let savedAddr = storeGet('wssh.svraddr');
-    let savedUser = storeGet('wssh.user');
+    let savedAddr = svraddr || storeGet('wssh.svraddr');
+    let savedUser = user || storeGet('wssh.user');
     let savedKey = storeGet('wssh.key');
 
     if (savedKey) selectedKeyFile = savedKey;
 
     if (savedUrl) els.wsurl.value = savedUrl;
 
-    if (savedAddr) {
-      let opts = els.svraddr.options;
-      let found = false;
-      for (let i = 0; i < opts.length; i++) {
-        if (opts[i].value === savedAddr) {
-          els.svraddr.value = savedAddr;
-          found = true;
-          break;
-        }
-      }
-    }
-
+    if (savedAddr) els.svraddr.value = savedAddr;
+  
     if (savedUser) els.username.value = savedUser;
 
     initTerminal();
