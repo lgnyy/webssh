@@ -80,6 +80,49 @@
       }).then(u8);
   }
 
+  // 浏览器不支持 WebCrypto 时，使用 JS 实现
+  if (!subtle) {
+    function loadScript(url) {
+      var s = document.createElement('script');
+      s.src = url;
+      s.async = true;
+      //s.onload = function () { resolve(); };
+      //s.onerror = function () { reject(new Error('load fail: ' + url)); };
+      document.head.appendChild(s);
+    }
+    loadScript('lib/ssh/algos.js');
+    
+    digest = function(alg, data) {
+      data = u8(data);
+      var name = HASH_MAP[alg] || alg;
+      if (name === 'SHA-256') return Promise.resolve(WSSH._sha256(data));
+      if (name === 'SHA-512') return Promise.resolve(WSSH._sha512(data));
+      /* SHA-1 / SHA-384 需补实现 */
+      return Promise.reject(new Error('unsupported hash ' + name));
+    }
+
+    hmac = function(alg, key, data) {
+      key = u8(key); data = u8(data);
+      var name = HASH_MAP[alg] || alg;
+      if (name === 'SHA-256') return WSSH._hmacJS(WSSH._sha256, 64, key, data);
+      if (name === 'SHA-512') return WSSH._hmacJS(WSSH._sha512, 128, key, data);
+      return Promise.reject(new Error('unsupported hmac ' + name));
+    }
+
+    aesCTR = function (key, iv, data, enc) { return WSSH._aesCTR(u8(key), u8(iv), u8(data), enc); }
+    aesCBCEncrypt = function (key, iv, data) { return WSSH._aesCBCEncrypt(u8(key), u8(iv), u8(data)); } 
+    aesCBCDecrypt = function (key, iv, data) { return WSSH._aesCBCDecrypt(u8(key), u8(iv), u8(data)); }
+    aesGCMEncrypt = function (key, iv, plain, aad) { return WSSH._aesGCMEncrypt(u8(key), u8(iv), u8(plain), aad); }
+    aesGCMDecrypt = function (key, iv, data, aad) { return WSSH._aesGCMDecrypt(u8(key), u8(iv), u8(data), aad); }     
+
+    pbkdf2 = function (pw, salt, iter, len, hashAlg) {
+      var name = HASH_MAP[hashAlg] || hashAlg;
+      if (name === 'SHA-256') return WSSH._pbkdf2JS(WSSH._sha256, 32, u8(pw), u8(salt), iter, len);
+      if (name === 'SHA-512') return WSSH._pbkdf2JS(WSSH._sha512, 64, u8(pw), u8(salt), iter, len); 
+      return Promise.reject(new Error('unsupported pbkdf2 hash'));
+    }
+  }
+
   /* ================= NIST 曲线 ECDH / ECDSA ================= */
   var EC_INFO = {
     'nistp256': { crv: 'P-256', size: 32 },
