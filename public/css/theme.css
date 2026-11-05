@@ -1,0 +1,115 @@
+/*!
+ * theme.css - 深色/浅色主题（浅色采用 Catppuccin Latte 配色）
+ * 由 html[data-theme="light"] 覆盖各页面原有硬编码颜色
+ */
+
+/* ================= 主页面 index.html ================= */
+html[data-theme="light"] body { background: #eff1f5; color: #4c4f69; }
+html[data-theme="light"] #loginbar { background: #e6e9ef; border-bottom-color: #bcc0cc; }
+html[data-theme="light"] .field label { color: #1e66f5; }
+html[data-theme="light"] .field input[type=text],
+html[data-theme="light"] .field input[type=password],
+html[data-theme="light"] .field input[type=file],
+html[data-theme="light"] .field select { background: #ffffff; border-color: #bcc0cc; color: #4c4f69; }
+html[data-theme="light"] #btn-config,
+html[data-theme="light"] .cfg-io-btn { background: #ccd0da; border-color: #bcc0cc; color: #4c4f69; }
+html[data-theme="light"] #btn-config:hover,
+html[data-theme="light"] .cfg-io-btn:hover { background: #bcc0cc; border-color: #1e66f5; }
+html[data-theme="light"] #auth-tabs button { background: #ffffff; border-color: #bcc0cc; color: #6c6f85; }
+html[data-theme="light"] #auth-tabs button.active { background: #1e66f5; color: #ffffff; border-color: #1e66f5; }
+html[data-theme="light"] #btn-sftp,
+html[data-theme="light"] #btn-fwd,
+html[data-theme="light"] #btn-theme { background: #ccd0da; border-color: #bcc0cc; color: #4c4f69; }
+html[data-theme="light"] #btn-sftp:hover,
+html[data-theme="light"] #btn-fwd:hover,
+html[data-theme="light"] #btn-theme:hover { background: #bcc0cc; border-color: #1e66f5; }
+html[data-theme="light"] #btn-sftp.active { background: #1e66f5; color: #ffffff; border-color: #1e66f5; }
+html[data-theme="light"] #btn-fwd.active { background: #df8e1d; color: #ffffff; border-color: #df8e1d; }
+html[data-theme="light"] #btn-connect { background: #40a02b; color: #ffffff; }
+html[data-theme="light"] #btn-connect:hover { background: #347f22; }
+html[data-theme="light"] #btn-connect.disconnect { background: #d20f39; color: #ffffff; }
+html[data-theme="light"] #btn-connect.disconnect:hover { background: #b30d31; }
+html[data-theme="light"] #btn-connect:disabled { background: #ccd0da; color: #9ca0b0; }
+html[data-theme="light"] #status { color: #6c6f85; }
+html[data-theme="light"] #status .dot { background: #9ca0b0; }
+html[data-theme="light"] #config-overlay { background: rgba(76,79,105,0.45); }
+html[data-theme="light"] #config-panel { background: #eff1f5; border-color: #bcc0cc; box-shadow: 0 8px 40px rgba(76,79,105,0.25); }
+html[data-theme="light"] #config-header { border-bottom-color: #ccd0da; }
+html[data-theme="light"] #config-header h2 { color: #1e66f5; }
+html[data-theme="light"] #config-close { color: #6c6f85; }
+html[data-theme="light"] #config-body .hint { color: #8c8fa1; }
+html[data-theme="light"] .srv-item { background: #e6e9ef; border-color: #ccd0da; }
+html[data-theme="light"] .srv-item input { background: #ffffff; border-color: #bcc0cc; color: #4c4f69; }
+html[data-theme="light"] .srv-item .srv-label { color: #9ca0b0; }
+html[data-theme="light"] .srv-item .srv-del { background: #fbdae0; border-color: #d20f39; color: #d20f39; }
+html[data-theme="light"] #btn-add-srv { background: #e6e9ef; border-color: #bcc0cc; color: #6c6f85; }
+html[data-theme="light"] #config-footer { border-top-color: #ccd0da; }
+html[data-theme="light"] #btn-cancel-config { background: #ccd0da; color: #4c4f69; }
+html[data-theme="light"] #btn-save-config { background: #40a02b; color: #ffffff; }
+html[data-theme="light"] #hostkey-bar { background: #fbdae0; border-bottom-color: #d20f39; color: #4c4f69; }
+html[data-theme="light"] #hostkey-bar .hk-fp { color: #df8e1d; }
+html[data-theme="light"] #btn-hk-trust { background: #40a02b; color: #ffffff; }
+html[data-theme="light"] #btn-hk-reject { background: #d20f39; color: #ffffff; }
+html[data-theme="light"] #right-col { background: #eff1f5; border-left-color: #bcc0cc; }
+html[data-theme="light"] #sftp-panel,
+html[data-theme="light"] #fwd-panel { background: #eff1f5; }
+html[data-theme="light"] #fwd-panel { border-top-color: #bcc0cc; }
+html[data-theme="light"] #sftp-splitter { background: #ccd0da; }
+html[data-theme="light"] #sftp-splitter:hover,
+html[data-theme="light"] #sftp-splitter.dragging { background: #1e66f5; }
+html[data-theme="light"] #terminal-wrap { background: #eff1f5; }
+html[data-theme="light"] #tip { color: #9ca0b0; }
+
+/* ================= SFTP 页 sftp.html ================= */
+html[data-theme="light"] body { background: #eff1f5; color: #4c4f69; }
+html[data-theme="light"] #toolbar { background: #e6e9ef; border-bottom-color: #bcc0cc; }
+html[data-theme="light"] #toolbar button { background: #ccd0da; border-color: #bcc0cc; color: #4c4f69; }
+html[data-theme="light"] #toolbar button:hover { background: #bcc0cc; border-color: #1e66f5; }
+html[data-theme="light"] #toolbar .sep { background: #ccd0da; }
+html[data-theme="light"] #pathbar { background: #ffffff; border-color: #bcc0cc; }
+html[data-theme="light"] #pathbar input { color: #4c4f69; }
+html[data-theme="light"] #pathbar button { color: #1e66f5; }
+html[data-theme="light"] #filelist-wrap { background: #eff1f5; }
+html[data-theme="light"] #filelist th { background: #e6e9ef; border-bottom-color: #bcc0cc; color: #1e66f5; }
+html[data-theme="light"] #filelist td { border-bottom-color: rgba(172,176,190,0.4); }
+html[data-theme="light"] #filelist tr:hover { background: rgba(30,102,245,0.06); }
+html[data-theme="light"] #filelist tr.selected { background: rgba(30,102,245,0.16); }
+html[data-theme="light"] #filelist td.size { color: #6c6f85; }
+html[data-theme="light"] #filelist td.date { color: #8c8fa1; }
+html[data-theme="light"] .icon-dir { color: #df8e1d; }
+html[data-theme="light"] .icon-file { color: #1e66f5; }
+html[data-theme="light"] .icon-link { color: #ea76cb; }
+html[data-theme="light"] #filelist-wrap.dragover { background: rgba(30,102,245,0.08); outline-color: #1e66f5; }
+html[data-theme="light"] #statusbar { background: #e6e9ef; border-top-color: #bcc0cc; color: #8c8fa1; }
+html[data-theme="light"] #statusbar .count { color: #1e66f5; }
+html[data-theme="light"] #progress-overlay { background: #ffffff; border-color: #bcc0cc; }
+html[data-theme="light"] .prog-item .bar { background: #ccd0da; }
+html[data-theme="light"] .prog-item .pct { color: #6c6f85; }
+html[data-theme="light"] #empty-state { color: #9ca0b0; }
+
+/* ================= 端口转发页 portforward.html ================= */
+html[data-theme="light"] body { background: #eff1f5; color: #4c4f69; }
+html[data-theme="light"] #mode-bar { background: #e6e9ef; border-bottom-color: #bcc0cc; }
+html[data-theme="light"] #mode-bar button { color: #6c6f85; }
+html[data-theme="light"] #mode-bar button.active { color: #df8e1d; border-bottom-color: #df8e1d; }
+html[data-theme="light"] #conn-bar { background: #e6e9ef; border-bottom-color: #bcc0cc; }
+html[data-theme="light"] .fld label { color: #1e66f5; }
+html[data-theme="light"] .fld input { background: #ffffff; border-color: #bcc0cc; color: #4c4f69; }
+html[data-theme="light"] #conn-status { color: #6c6f85; }
+html[data-theme="light"] #conn-status .dot { background: #9ca0b0; }
+html[data-theme="light"] #conn-list-wrap { background: #eff1f5; border-bottom-color: #bcc0cc; }
+html[data-theme="light"] #conn-list th { background: #e6e9ef; color: #1e66f5; border-bottom-color: #bcc0cc; }
+html[data-theme="light"] #conn-list td { border-bottom-color: rgba(172,176,190,0.4); }
+html[data-theme="light"] #conn-list td.cid { color: #df8e1d; }
+html[data-theme="light"] #conn-list td.origin { color: #6c6f85; }
+html[data-theme="light"] #conn-list tr.closed { color: #9ca0b0; }
+html[data-theme="light"] .pane-head { background: #e6e9ef; color: #1e66f5; }
+html[data-theme="light"] .pane + .pane { border-top-color: #bcc0cc; }
+html[data-theme="light"] .mode-tabs button { background: #ffffff; border-color: #bcc0cc; color: #6c6f85; }
+html[data-theme="light"] .mode-tabs button.active { background: #1e66f5; color: #ffffff; border-color: #1e66f5; }
+html[data-theme="light"] textarea.io-text { background: #ffffff; color: #4c4f69; }
+html[data-theme="light"] #send-bar { background: #e6e9ef; border-top-color: #bcc0cc; }
+html[data-theme="light"] #send-bar button { background: #ccd0da; border-color: #bcc0cc; color: #4c4f69; }
+html[data-theme="light"] #send-bar .hint { color: #8c8fa1; }
+html[data-theme="light"] #statusbar { background: #e6e9ef; border-top-color: #bcc0cc; color: #8c8fa1; }
+html[data-theme="light"] #statusbar .bytes { color: #df8e1d; }

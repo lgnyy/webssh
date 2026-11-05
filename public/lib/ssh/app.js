@@ -19,6 +19,7 @@
     fKeyfile: $('f-keyfile'),
     fKeypass: $('f-keypass'),
     btnConnect: $('btn-connect'),
+    btnTheme: $('btn-theme'),
     btnImport: $('btn-import'),
     btnExport: $('btn-export'),
     importFile: $('import-file'),
@@ -37,7 +38,7 @@
     tip: $('tip'),
     // SFTP 面板
     btnSftp: $('btn-sftp'),
-    leftCol: $('left-col'),
+    rightCol: $('right-col'),
     sftpPanel: $('sftp-panel'),
     sftpFrame: $('sftp-frame'),
     sftpSplitter: $('sftp-splitter'),
@@ -90,6 +91,65 @@
   }
   function storeDel(k) {
     try { window.localStorage.removeItem(k); } catch (e) { }
+  }
+
+  /* ================= 主题（深色 / 浅色） ================= */
+  const THEME_KEY = 'wssh.theme';
+  let currentTheme = 'dark';
+
+  // 返回当前主题对应的 xterm 配色
+  function termTheme() {
+    if (currentTheme === 'light') {
+      return {
+        background: '#eff1f5', foreground: '#4c4f69', cursor: '#1e66f5',
+        selectionBackground: '#bcc0cc'
+      };
+    }
+    return {
+      background: '#11111b', foreground: '#cdd6f4', cursor: '#f5e0dc',
+      selectionBackground: '#585b70'
+    };
+  }
+
+  // 把主题广播给右侧 iframe 面板（SFTP / 端口转发）
+  function broadcastTheme() {
+    [els.sftpFrame, els.fwdFrame].forEach(function (fr) {
+      try {
+        if (fr && fr.contentWindow) {
+          fr.contentWindow.postMessage({ type: 'theme', theme: currentTheme }, '*');
+        }
+      } catch (e) { }
+    });
+  }
+
+  // 应用主题：更新页面属性、按钮文案、终端配色并持久化
+  function applyTheme(theme) {
+    currentTheme = (theme === 'light') ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', currentTheme);
+    storeSet(THEME_KEY, currentTheme);
+    if (els.btnTheme) {
+      els.btnTheme.textContent = currentTheme === 'dark' ? '☀️ 浅色' : '🌙 深色';
+      els.btnTheme.title = currentTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式';
+    }
+    if (term) {
+      let t = termTheme();
+      // 兼容 xterm 4 (setOption) 与 xterm 5 (options.theme)
+      try { term.options.theme = t; } catch (e) { }
+      try { if (typeof term.setOption === 'function') term.setOption('theme', t); } catch (e) { }
+    }
+    broadcastTheme();
+  }
+
+  // 切换主题
+  function toggleTheme() {
+    applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  }
+
+  // 初始化主题：读取本地设置并绑定切换按钮
+  function initTheme() {
+    let saved = storeGet(THEME_KEY);
+    applyTheme(saved === 'light' ? 'light' : 'dark');
+    if (els.btnTheme) els.btnTheme.addEventListener('click', toggleTheme);
   }
 
   /* ================= 服务器配置管理 ================= */
@@ -259,10 +319,10 @@
   // 导出：把 localStorage 中的连接信息打包为 JSON 并下载
   els.btnExport.addEventListener('click', function () {
     let cfg = {
-      wsurl:   storeGet('wssh.wsurl')   || '',
+      wsurl: storeGet('wssh.wsurl') || '',
       servers: storeGet('wssh.servers') || '',
-      user:    storeGet('wssh.user')    || '',
-      key:     storeGet('wssh.key')     || ''
+      user: storeGet('wssh.user') || '',
+      key: storeGet('wssh.key') || ''
     };
     let blob = new Blob([JSON.stringify(cfg, null, 2)], { type: 'application/json' });
     let a = document.createElement('a');
@@ -291,14 +351,14 @@
         let cfg = JSON.parse(reader.result);
         if (!cfg || typeof cfg !== 'object') throw new Error('配置格式错误');
 
-        if (typeof cfg.wsurl   === 'string') storeSet('wssh.wsurl',   cfg.wsurl);
+        if (typeof cfg.wsurl === 'string') storeSet('wssh.wsurl', cfg.wsurl);
         if (typeof cfg.servers === 'string') storeSet('wssh.servers', cfg.servers);
-        if (typeof cfg.user    === 'string') storeSet('wssh.user',    cfg.user);
-        if (typeof cfg.key     === 'string') storeSet('wssh.key',     cfg.key);
+        if (typeof cfg.user === 'string') storeSet('wssh.user', cfg.user);
+        if (typeof cfg.key === 'string') storeSet('wssh.key', cfg.key);
 
         // 刷新 UI
         if (cfg.wsurl) els.wsurl.value = cfg.wsurl;
-        if (cfg.user)  els.username.value = cfg.user;
+        if (cfg.user) els.username.value = cfg.user;
         if (cfg.servers) {
           loadServerList();
           refreshSvrSelect(false);
@@ -339,18 +399,18 @@
     selectedKeyFile = els.keyfile.files && els.keyfile.files[0] ? els.keyfile.files[0] : null;
   });
 
-  /* ================= 左侧面板控制（SFTP + 端口转发） ================= */
-  // 根据 sftpEnabled / fwdEnabled 刷新左侧列可见性与分隔条
-  function refreshLeftCol() {
+  /* ================= 右侧面板控制（SFTP + 端口转发） ================= */
+  // 根据 sftpEnabled / fwdEnabled 刷新右侧列可见性与分隔条
+  function refreshSideCol() {
     let anyOpen = sftpEnabled || fwdEnabled;
-    els.leftCol.style.display = anyOpen ? 'flex' : 'none';
+    els.rightCol.style.display = anyOpen ? 'flex' : 'none';
     els.sftpSplitter.style.display = anyOpen ? 'block' : 'none';
     if (anyOpen) {
-      let savedW = storeGet('wssh.sftpW');
+      let savedW = storeGet('wssh.rightColW');
       if (savedW && /^(\d+(px|%))$/.test(savedW)) {
-        els.leftCol.style.flex = '0 0 ' + savedW;
+        els.rightCol.style.flex = '0 0 ' + savedW;
       } else {
-        els.leftCol.style.flex = '';
+        els.rightCol.style.flex = '';
       }
     }
     // SFTP 与转发面板各自显示/隐藏，并在只有一个时占满整列
@@ -383,7 +443,7 @@
       els.btnSftp.classList.remove('active');
       els.sftpFrame.src = 'about:blank';
     }
-    refreshLeftCol();
+    refreshSideCol();
   }
   els.btnSftp.addEventListener('click', toggleSftp);
 
@@ -403,50 +463,55 @@
       els.btnFwd.classList.remove('active');
       // 不重载 iframe，保留历史
     }
-    refreshLeftCol();
+    refreshSideCol();
   }
   els.btnFwd.addEventListener('click', toggleFwd);
 
-  /* ---- 左侧列分隔条拖拽（调整宽度） ---- */
+    /* ---- 右侧列分隔条拖拽（调整宽度） ---- */
   (function setupSplitter() {
     let dragging = false;
     let startX = 0;
     let startW = 0;
 
-    els.sftpSplitter.addEventListener('mousedown', function (ev) {
-      if (!sftpEnabled && !fwdEnabled) return;
-      ev.preventDefault();
-      dragging = true;
-      els.sftpSplitter.classList.add('dragging');
-      startX = ev.clientX;
-      // 用 px 计算更稳定
-      startW = els.leftCol.getBoundingClientRect().width;
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
-    });
-    document.addEventListener('mousemove', function (ev) {
-      if (!dragging) return;
-      // 拖拽分隔条：向右拖 = 增大左侧列
-      let delta = ev.clientX - startX;
-      let newW = startW + delta;
-      let mainW = els.leftCol.parentElement.getBoundingClientRect().width;
-      let minW = 240, maxW = Math.max(minW, mainW * 0.8);
-      if (newW < minW) newW = minW;
-      if (newW > maxW) newW = maxW;
-      els.leftCol.style.flex = '0 0 ' + newW + 'px';
-      scheduleResize(false);
-    });
-    document.addEventListener('mouseup', function () {
+    // 结束拖拽：清理状态并持久化宽度
+    function endDrag() {
       if (!dragging) return;
       dragging = false;
       els.sftpSplitter.classList.remove('dragging');
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-      // 持久化宽度
-      let w = els.leftCol.getBoundingClientRect().width;
-      if (w) storeSet('wssh.sftpW', Math.round(w) + 'px');
+      document.body.classList.remove('col-resizing');
+      let w = els.rightCol.getBoundingClientRect().width;
+      if (w) storeSet('wssh.rightColW', Math.round(w) + 'px');
       scheduleResize(true);
+    }
+
+    // 按下：记录起始位置，并用 Pointer Capture 锁定后续事件
+    els.sftpSplitter.addEventListener('pointerdown', function (ev) {
+      if (ev.button !== 0) return;
+      if (!sftpEnabled && !fwdEnabled) return;
+      ev.preventDefault();
+      dragging = true;
+      startX = ev.clientX;
+      startW = els.rightCol.getBoundingClientRect().width;
+      try { els.sftpSplitter.setPointerCapture(ev.pointerId); } catch (e) { }
+      els.sftpSplitter.classList.add('dragging');
+      document.body.classList.add('col-resizing');
     });
+
+    // 移动：向左拖 = 增大右侧列宽度
+    els.sftpSplitter.addEventListener('pointermove', function (ev) {
+      if (!dragging) return;
+      let newW = startW + (startX - ev.clientX);
+      let mainW = els.rightCol.parentElement.getBoundingClientRect().width;
+      let minW = 240, maxW = Math.max(minW, mainW * 0.8);
+      if (newW < minW) newW = minW;
+      if (newW > maxW) newW = maxW;
+      els.rightCol.style.flex = '0 0 ' + newW + 'px';
+      scheduleResize(false);
+    });
+
+    els.sftpSplitter.addEventListener('pointerup', endDrag);
+    els.sftpSplitter.addEventListener('pointercancel', endDrag);
+    els.sftpSplitter.addEventListener('lostpointercapture', endDrag);
   })();
 
   // 供 iframe (sftp.html) 调用：获取/创建 SFTP 客户端
@@ -709,12 +774,7 @@
       fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
       fontSize: 14,
       scrollback: 5000,
-      theme: {
-        background: '#11111b',
-        foreground: '#cdd6f4',
-        cursor: '#f5e0dc',
-        selectionBackground: '#585b70'
-      }
+      theme: termTheme()
     });
     fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
@@ -742,6 +802,15 @@
           els.terminalWrap.clientWidth, els.terminalWrap.clientHeight);
       }
     }, sendNow ? 0 : 120);
+  }
+
+  // 清空终端内容并恢复占位提示（断开连接时调用）
+  function resetTerminalView(showTip) {
+    if (term) {
+      try { term.reset(); } catch (e) { }
+      try { term.clear(); } catch (e) { }
+    }
+    if (els.tip) els.tip.style.display = showTip ? '' : 'none';
   }
 
   /* ================= WebSocket 包装 ================= */
@@ -848,12 +917,12 @@
     //  els.tabPassword, els.tabKey, els.btnConfig].forEach(function (el) { el.disabled = on; });
     let ellist = [$('f-wsurl'), $('f-svraddr'), $('f-user'), $('f-auth-mode')];
     if (authMode === 'key') {
-        ellist.push($('f-keyfile'), $('f-keypass'));
-    }else{
-        ellist.push($('f-password'));
+      ellist.push($('f-keyfile'), $('f-keypass'));
+    } else {
+      ellist.push($('f-password'));
     }
-    ellist.forEach(function (el) { 
-        el.style.display = on ? 'none' : ''; 
+    ellist.forEach(function (el) {
+      el.style.display = on ? 'none' : '';
     });
     if (on) {
       els.btnConnect.textContent = '断 开';
@@ -890,7 +959,7 @@
       if (!selectedKeyFile) { setStatus('error', '请选择私钥文件'); return; }
       setStatus('connecting', '正在解析私钥…');
       try {
-        keyText = typeof(selectedKeyFile) == 'string'? selectedKeyFile : await readKeyFile(selectedKeyFile);
+        keyText = typeof (selectedKeyFile) == 'string' ? selectedKeyFile : await readKeyFile(selectedKeyFile);
         privateKey = await WSSH.keys.parsePrivateKey(
           keyText, els.keypassphrase.value || '', selectedKeyFile.name);
       } catch (e) {
@@ -906,7 +975,7 @@
     manualClose = false;
     els.btnConnect.disabled = true;
     setStatus('connecting', '正在连接 ' + wsUrl2 + ' …');
-    els.tip.style.display = 'none';
+    resetTerminalView(false);
 
     try {
       let stream = await openWebSocket(wsUrl2);
@@ -959,7 +1028,7 @@
       storeSet('wssh.wsurl', wsUrl);
       storeSet('wssh.svraddr', svrAddr);
       storeSet('wssh.user', username);
-      if (typeof(selectedKeyFile) != 'string'){
+      if (typeof (selectedKeyFile) != 'string') {
         storeSet('wssh.key', keyText);
       }
     } catch (e) {
@@ -1014,7 +1083,7 @@
       })();
     }
 
-    refreshLeftCol();
+    refreshSideCol();
   }
 
   function handleRemoteClose(err) {
@@ -1026,13 +1095,11 @@
     closeAllPanels();
     if (manualClose) {
       setStatus('', '未连接');
-      if (term) term.write('\r\n\x1b[90m[连接已断开]\x1b[0m\r\n');
     } else {
       setStatus('error', err ? ('连接已断开：' + err.message) : '连接已被服务器关闭');
-      if (term) {
-        term.write('\r\n\x1b[31m[连接已断开' + (err ? '：' + err.message : '') + ']\x1b[0m\r\n');
-      }
     }
+    // 清空终端内容并恢复占位提示，等待下一次连接
+    resetTerminalView(true);
     channel = null;
     cleanupConnection();
   }
@@ -1068,8 +1135,10 @@
     connecting = false;
     setFormConnectedUI(false);
     setStatus('', '未连接');
+    // 清空终端内容并恢复占位提示，等待下一次连接
+    resetTerminalView(true);
     await cancelAllRemoteForwards();
-    closeAllPanels();   
+    closeAllPanels();
     if (channel) {
       let ch = channel;
       channel = null;
@@ -1087,6 +1156,7 @@
         els.btnConnect.disabled = false;
         setStatus('', '未连接');
         cleanupConnection();
+        resetTerminalView(true);
       } else {
         doDisconnect();
       }
@@ -1119,9 +1189,9 @@
     if (authmode) {
       setAuthMode(authmode);
     }
-  
+
     refreshSvrSelect(false);
-    
+
     let savedUrl = storeGet('wssh.wsurl');
     let savedAddr = svraddr || storeGet('wssh.svraddr');
     let savedUser = user || storeGet('wssh.user');
@@ -1132,9 +1202,10 @@
     if (savedUrl) els.wsurl.value = savedUrl;
 
     if (savedAddr) els.svraddr.value = savedAddr;
-  
+
     if (savedUser) els.username.value = savedUser;
 
+    initTheme();
     initTerminal();
     setStatus('', '未连接');
   })();

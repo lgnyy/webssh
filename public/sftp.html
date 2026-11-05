@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SFTP 文件管理</title>
+<link rel="stylesheet" href="css/theme.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { width: 100%; height: 100%; overflow: hidden; }
@@ -20,7 +21,7 @@
   }
   #toolbar button {
     background: #313244; border: 1px solid #585b70; color: #cdd6f4; border-radius: 4px;
-    padding: 5px 10px; font-size: 12px; cursor: pointer; height: 28px; white-space: nowrap;
+    padding: 5px 12px; font-size: 14px; cursor: pointer; height: 28px; white-space: nowrap;
   }
   #toolbar button:hover { background: #45475a; border-color: #89b4fa; }
   #toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -57,12 +58,12 @@
   }
   #filelist th:hover { color: #f5e0dc; }
   #filelist td {
-    padding: 4px 8px; border-bottom: 1px solid rgba(49,50,68,0.3);
+    padding: 5px 8px; border-bottom: 1px solid rgba(49,50,68,0.3);
     font-size: 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   #filelist tr:hover { background: rgba(137,180,250,0.06); }
   #filelist tr.selected { background: rgba(137,180,250,0.15); }
-  #filelist td.icon { width: 24px; text-align: center; }
+  #filelist td.icon { width: 36px; text-align: center; font-size: 18px; line-height: 1.1; }
   #filelist td.size { width: 80px; text-align: right; font-family: Consolas, monospace; color: #a6adc8; }
   #filelist td.date { width: 130px; color: #7f849c; font-family: Consolas, monospace; }
   .icon-dir { color: #f9e2af; }

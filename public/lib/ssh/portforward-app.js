@@ -39,6 +39,22 @@
   let recvMode = 'hex';
   let sendMode = 'hex';
 
+  /* ================= 主题同步 ================= */
+  // 应用主题到当前子页面
+  function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+  }
+
+  // 启动时读取父页面保存的主题，并监听父窗口的主题切换消息
+  (function initTheme() {
+    let t = 'dark';
+    try { t = window.localStorage.getItem('wssh.theme') || 'dark'; } catch (e) { }
+    applyTheme(t);
+    window.addEventListener('message', function (ev) {
+      if (ev.data && ev.data.type === 'theme') applyTheme(ev.data.theme);
+    });
+  })();
+
   // 本地转发状态
   let fwdId = null;
   let localOpen = false;
