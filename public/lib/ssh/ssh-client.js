@@ -1342,7 +1342,10 @@
         var wantReply = r.bool();
         if (ch && reqType === 'exit-status') {
           ch.exitCode = r.uint32();
-          if (ch.cbs.onExit) ch.cbs.onExit(ch.exitCode, null);
+          if (ch.cbs.onExit) {
+            // 回调异常不能冒泡到读循环，否则 _readLoop 会被 reject 并 _fail() 整个 SSH 会话
+            try { ch.cbs.onExit(ch.exitCode, null); } catch (e) { console.error('[ssh] onExit 回调异常', e); }
+          }
         }
         if (ch && reqType === 'exit-signal') {
           var sigName = U.bytesToStr(r.string());
