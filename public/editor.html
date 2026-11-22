@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>编辑文件</title>
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="lib/codemirror/codemirror.min.css">
+<link rel="stylesheet" href="lib/codemirror/addon/dialog/dialog.min.css">
+<link rel="stylesheet" href="lib/codemirror/theme/material-darker.min.css">
+<link rel="stylesheet" href="lib/codemirror/theme/eclipse.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #11111b; color: #cdd6f4; display: flex; flex-direction: column;
+    font-size: 13px;
+  }
+
+  /* ===== 工具栏 ===== */
+  #toolbar {
+    flex: 0 0 auto; background: #181825; border-bottom: 1px solid #313244;
+    padding: 6px 10px; display: flex; gap: 8px; align-items: center; height: 42px;
+  }
+  #file-icon { font-size: 15px; }
+  #file-name { font-weight: 600; color: #89b4fa; white-space: nowrap; }
+  #dirty-flag { color: #f9e2af; display: none; font-size: 16px; line-height: 1; }
+  #dirty-flag.show { display: inline; }
+  #file-path {
+    flex: 1 1 auto; min-width: 0; color: #7f849c; font-size: 11px;
+    font-family: Consolas, Menlo, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  #toolbar button {
+    background: #313244; border: 1px solid #585b70; color: #cdd6f4; border-radius: 4px;
+    padding: 0 12px; font-size: 14px; cursor: pointer; height: 28px; white-space: nowrap;
+  }
+  #toolbar button:hover { background: #45475a; border-color: #89b4fa; }
+  #toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #btn-save { color: #a6e3a1; }
+
+  /* ===== 编辑区 ===== */
+  #editor-wrap { flex: 1 1 auto; min-height: 0; position: relative; }
+  #editor-wrap .CodeMirror {
+    position: absolute; inset: 0; height: 100%;
+    font-family: Consolas, Menlo, monospace; font-size: 13px; line-height: 1.5;
+  }
+  /* 深色主题贴合现有配色 */
+  .cm-s-material-darker.CodeMirror { background: #11111b; color: #cdd6f4; }
+  .cm-s-material-darker .CodeMirror-gutters { background: #11111b; border-right: 1px solid #313244; }
+  .cm-s-material-darker .CodeMirror-linenumber { color: #585b70; }
+  .cm-s-material-darker .CodeMirror-cursor { border-left: 1px solid #f5e0dc; }
+  .cm-s-material-darker .CodeMirror-selected { background: rgba(137,180,250,0.2); }
+  .cm-s-material-darker .CodeMirror-activeline-background { background: rgba(137,180,250,0.05); }
+
+  /* 浅色主题 */
+  .cm-s-eclipse.CodeMirror { background: #ffffff; color: #4c4f69; }
+  .cm-s-eclipse .CodeMirror-gutters { background: #f5f6f8; border-right: 1px solid #ccd0da; }
+
+  /* 查找/跳转对话框 */
+  .CodeMirror-dialog {
+    background: #181825; color: #cdd6f4; border-bottom: 1px solid #313244; padding: 4px 8px;
+  }
+  .CodeMirror-dialog input {
+    background: #11111b; border: 1px solid #45475a; color: #cdd6f4; padding: 2px 5px; outline: none;
+  }
+
+  /* ===== 状态栏 ===== */
+  #statusbar {
+    flex: 0 0 auto; background: #181825; border-top: 1px solid #313244;
+    padding: 4px 10px; font-size: 11px; color: #7f849c; display: flex; gap: 16px;
+  }
+  #status-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #cursor-pos, #file-size { font-family: Consolas, Menlo, monospace; }
+  #status-msg.err { color: #f38ba8; }
+  #status-msg.ok { color: #a6e3a1; }
+
+  /* ===== 遮罩提示 ===== */
+  #overlay {
+    display: none; position: fixed; inset: 0; background: rgba(17,17,27,0.85);
+    align-items: center; justify-content: center; z-index: 50; padding: 24px;
+  }
+  #overlay.show { display: flex; }
+  #overlay .box {
+    max-width: 460px; background: #1e1e2e; border: 1px solid #45475a; border-radius: 8px;
+    padding: 20px 24px; text-align: center; line-height: 1.7;
+  }
+  #overlay .box .big { font-size: 26px; margin-bottom: 6px; }
+  #overlay .box button {
+    margin-top: 14px; background: #313244; border: 1px solid #585b70; color: #cdd6f4;
+    border-radius: 4px; padding: 5px 16px; cursor: pointer;
+  }
+
+  /* ===== 浅色主题 ===== */
+  html[data-theme="light"] body { background: #eff1f5; color: #4c4f69; }
+  html[data-theme="light"] #toolbar { background: #e6e9ef; border-bottom-color: #bcc0cc; }
+  html[data-theme="light"] #file-name { color: #1e66f5; }
+  html[data-theme="light"] #file-path { color: #8c8fa1; }
+  html[data-theme="light"] #dirty-flag { color: #df8e1d; }
+  html[data-theme="light"] #toolbar button { background: #ccd0da; border-color: #bcc0cc; color: #4c4f69; }
+  html[data-theme="light"] #toolbar button:hover { background: #bcc0cc; border-color: #1e66f5; }
+  html[data-theme="light"] #btn-save { color: #40a02b; }
+  html[data-theme="light"] #statusbar { background: #e6e9ef; border-top-color: #bcc0cc; color: #8c8fa1; }
+  html[data-theme="light"] #status-msg.err { color: #d20f39; }
+  html[data-theme="light"] #status-msg.ok { color: #40a02b; }
+  html[data-theme="light"] .CodeMirror-dialog { background: #e6e9ef; color: #4c4f69; border-bottom-color: #bcc0cc; }
+  html[data-theme="light"] .CodeMirror-dialog input { background: #ffffff; border-color: #bcc0cc; color: #4c4f69; }
+  html[data-theme="light"] #overlay { background: rgba(239,241,245,0.85); }
+  html[data-theme="light"] #overlay .box { background: #ffffff; border-color: #bcc0cc; }
+  html[data-theme="light"] #overlay .box button { background: #ccd0da; border-color: #bcc0cc; color: #4c4f69; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <span id="file-icon">📄</span>
+  <span id="file-name">-</span>
+  <span id="dirty-flag" title="有未保存的修改">●</span>
+  <span id="file-path" title=""></span>
+  <button id="btn-save" disabled title="保存 (Ctrl+S)">保存</button>
+  <button id="btn-reload" title="放弃修改并重新从服务器读取">重新加载</button>
+  <button id="btn-close" title="关闭窗口">关闭</button>
+</div>
+
+<div id="editor-wrap">
+  <textarea id="editor" spellcheck="false"></textarea>
+</div>
+
+<div id="statusbar">
+  <span id="status-msg">就绪</span>
+  <span id="cursor-pos"></span>
+  <span id="file-size"></span>
+</div>
+
+<div id="overlay">
+  <div class="box">
+    <div class="big">⚠️</div>
+    <div id="overlay-msg"></div>
+    <button id="overlay-close">关闭窗口</button>
+  </div>
+</div>
+
+<script src="lib/codemirror/codemirror.min.js"></script>
+<script src="lib/codemirror/addon/mode-simple.min.js"></script>
+<script src="lib/codemirror/mode/xml.min.js"></script>
+<script src="lib/codemirror/mode/javascript.min.js"></script>
+<script src="lib/codemirror/mode/css.min.js"></script>
+<script src="lib/codemirror/mode/htmlmixed.min.js"></script>
+<script src="lib/codemirror/mode/clike.min.js"></script>
+<script src="lib/codemirror/mode/php.min.js"></script>
+<script src="lib/codemirror/mode/shell.min.js"></script>
+<script src="lib/codemirror/mode/python.min.js"></script>
+<script src="lib/codemirror/mode/markdown.min.js"></script>
+<script src="lib/codemirror/mode/yaml.min.js"></script>
+<script src="lib/codemirror/mode/sql.min.js"></script>
+<script src="lib/codemirror/mode/go.min.js"></script>
+<script src="lib/codemirror/mode/dockerfile.min.js"></script>
+<script src="lib/codemirror/mode/nginx.min.js"></script>
+<script src="lib/codemirror/mode/properties.min.js"></script>
+<script src="lib/codemirror/addon/edit/matchbrackets.min.js"></script>
+<script src="lib/codemirror/addon/edit/closebrackets.min.js"></script>
+<script src="lib/codemirror/addon/selection/active-line.min.js"></script>
+<script src="lib/codemirror/addon/search/search.min.js"></script>
+<script src="lib/codemirror/addon/search/jump-to-line.min.js"></script>
+<script src="lib/codemirror/addon/dialog/dialog.min.js"></script>
+<script src="lib/ssh/editor-app.js"></script>
+</body>
+</html>

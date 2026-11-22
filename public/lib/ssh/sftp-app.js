@@ -280,13 +280,13 @@
         updateButtonStates();
       });
 
-      // 双击：目录=进入，文件=下载
+      // 双击：目录=进入，文件=在独立窗口中编辑
       tr.addEventListener('dblclick', function (ev) {
         ev.preventDefault();
         if (isDir(entry)) {
           loadDir(joinPath(cwd, entry.filename));
         } else {
-          downloadFile(joinPath(cwd, entry.filename), entry.filename);
+          openEditor(joinPath(cwd, entry.filename), entry.filename);
         }
       });
 
@@ -301,6 +301,52 @@
     els.btnDelete.disabled = !hasSelection;
     els.btnDownload.disabled = !canDownload;
   }
+
+  /* ================= 编辑（独立窗口） ================= */
+  function hashStr(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+
+  function openEditor(remotePath, filename) {
+    let url = 'editor.html?path=' + encodeURIComponent(remotePath) +
+      '&name=' + encodeURIComponent(filename);
+    let winName = 'wssh-editor-' + hashStr(remotePath);
+    let w = window.open(url, winName, 'width=980,height=720,menubar=no,toolbar=no,status=no');
+    if (!w) {
+      setMsg('无法打开编辑窗口，请允许本站弹出窗口');
+      return;
+    }
+    try { w.focus(); } catch (e) { }
+  }
+
+  // 编辑窗口 (editor.html) 通过 postMessage 请求读写远端文件
+  window.addEventListener('message', async function (ev) {
+    let d = ev.data;
+    if (!d || d.type !== 'sftp-editor-call') return;
+    let reply = function (ok, result, error) {
+      try {
+        ev.source.postMessage({ type: 'sftp-editor-result', id: d.id, ok: ok, result: result, error: error }, '*');
+      } catch (e) { }
+    };
+    try {
+      let client = await ensureSftp();
+      if (d.method === 'read') {
+        let data = await client.readFileAll(d.path);
+        reply(true, { data: data });
+      } else if (d.method === 'write') {
+        let bytes = d.data instanceof Uint8Array ? d.data : new Uint8Array(d.data);
+        await client.writeFileAll(d.path, bytes);
+        setMsg('已保存: ' + d.path);
+        reply(true, { size: bytes.length });
+      } else {
+        reply(false, null, '未知操作: ' + d.method);
+      }
+    } catch (e) {
+      reply(false, null, e.message);
+    }
+  });
 
   /* ================= 导航 ================= */
   els.btnUp.addEventListener('click', function () { loadDir(parentPath(cwd)); });
