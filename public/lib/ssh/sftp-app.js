@@ -14,6 +14,7 @@
     pathInput: $('path-input'),
     btnMkdir: $('btn-mkdir'),
     btnDelete: $('btn-delete'),
+    btnEdit: $('btn-edit'),
     btnDownload: $('btn-download'),
     btnUpload: $('btn-upload'),
     fileUpload: $('file-upload'),
@@ -280,13 +281,13 @@
         updateButtonStates();
       });
 
-      // 双击：目录=进入，文件=在独立窗口中编辑
+      // 双击：目录=进入，文件=下载
       tr.addEventListener('dblclick', function (ev) {
         ev.preventDefault();
         if (isDir(entry)) {
           loadDir(joinPath(cwd, entry.filename));
         } else {
-          openEditor(joinPath(cwd, entry.filename), entry.filename);
+          downloadFile(joinPath(cwd, entry.filename), entry.filename);
         }
       });
 
@@ -298,7 +299,9 @@
     let hasSelection = selectedItems.length > 0;
     let singleSelected = selectedItems.length === 1;
     let canDownload = selectedItems.length > 0 && selectedItems.some(function (it) { return !it.isDir; });
+    let canEdit = singleSelected && !selectedItems[0].isDir;
     els.btnDelete.disabled = !hasSelection;
+    els.btnEdit.disabled = !canEdit;
     els.btnDownload.disabled = !canDownload;
   }
 
@@ -320,6 +323,13 @@
     }
     try { w.focus(); } catch (e) { }
   }
+
+  els.btnEdit.addEventListener('click', function () {
+    if (selectedItems.length !== 1) return;
+    let item = selectedItems[0];
+    if (item.isDir) return;
+    openEditor(item.path, item.filename);
+  });
 
   // 编辑窗口 (editor.html) 通过 postMessage 请求读写远端文件
   window.addEventListener('message', async function (ev) {
