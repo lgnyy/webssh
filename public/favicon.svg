@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e1e2e"/>
+      <stop offset="1" stop-color="#11111b"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 圆角底板 -->
+  <rect width="64" height="64" rx="14" fill="url(#bg)"/>
+  <rect x="3" y="3" width="58" height="58" rx="12" fill="none" stroke="#45475a" stroke-width="2"/>
+
+  <!-- 终端提示符 > -->
+  <path d="M19 21 L31 32 L19 43" fill="none" stroke="#89b4fa" stroke-width="7"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 光标下划线 -->
+  <path d="M37 43 H46" fill="none" stroke="#a6e3a1" stroke-width="7" stroke-linecap="round"/>
+</svg>
